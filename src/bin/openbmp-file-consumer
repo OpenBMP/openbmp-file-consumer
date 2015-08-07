@@ -1,0 +1,900 @@
+#!/usr/bin/env python
+"""OpenBMP basic file consumer
+
+  Copyright (c) 2013-2015 Cisco Systems, Inc. and others.  All rights reserved.
+  This program and the accompanying materials are made available under the
+  terms of the Eclipse Public License v1.0 which accompanies this distribution,
+  and is available at http://www.eclipse.org/legal/epl-v10.html
+
+  .. moduleauthor:: Tim Evens <tievens@cisco.com>
+"""
+import time
+import datetime
+import calendar
+import getopt
+import sys
+import os
+import socket
+import logging
+import logging.handlers
+import kafka
+
+from openbmp.parsed.headers import headers as parsed_headers
+from openbmp.parsed.collector import collector
+from openbmp.parsed.router import router
+from openbmp.parsed.peer import peer
+from openbmp.parsed.base_attribute import base_attribute
+from openbmp.parsed.unicast_prefix import unicast_prefix
+from openbmp.parsed.bmp_stat import bmp_stat
+from openbmp.parsed.ls_node import ls_node
+from openbmp.parsed.ls_link import ls_link
+from openbmp.parsed.ls_prefix import ls_prefix
+
+
+# Collector logger hash to keep track of file loggers for collector object/messages
+#     Key = <collector hash>
+#     Value = Logger
+COLLECTOR_LOGGERS = {}
+
+# Collector admin ID lookup HASH
+#    Key = <collector hash>, Value = (admin ID, lastTS)
+COLLECTOR_ADMIN_ID = {}
+
+# Hashes to track Loggers
+#     Key = <collector hash>, Value = Dictionary (key = router hash id, value = logger)
+ROUTER_LOGGERS = {}
+PEER_LOGGERS = {}
+BMP_STAT_LOGGERS = {}
+BASE_ATTR_LOGGERS = {}
+UNICAST_PREFIX_LOGGERS = {}
+LS_NODE_LOGGERS = {}
+LS_LINK_LOGGERS = {}
+LS_PREFIX_LOGGERS = {}
+
+# BMP RAW hash to keep track of opened files
+#    Key = <collector hash>, Value = Dictionary (key = router hash_id, opened file descriptor)
+BMP_RAW_FDS = {}
+
+
+
+def processCollectorMsg(c_hash, data, fdir):
+    """ Process collector message
+
+    :param c_hash:      Collector Hash ID
+    :param data:        Message data to be consumed (should not contain headers)
+    :param fdir:        Directory where to store the parsed files
+    """
+    obj = collector()
+    newCollector = False
+
+    # Create logger if new
+    if c_hash not in COLLECTOR_LOGGERS:
+        filepath = fdir
+
+        try:
+            os.makedirs(filepath)
+        except:
+            pass
+
+        COLLECTOR_LOGGERS[c_hash] = initLogger('openbmp.parsed.collector.' + c_hash,
+                                               os.path.join(filepath, 'collectors.txt'))
+        newCollector = True
+
+    # Log messages
+    for row in data.split('\n'):
+        if (len(row)):
+            try:
+                obj.parse(row)
+
+                # Save the collector admin ID to hash id
+                cur_ts = calendar.timegm(datetime.datetime.strptime(obj.getTimestamp(), "%Y-%m-%d %H:%M:%S.%f").timetuple())
+                COLLECTOR_ADMIN_ID[c_hash] = (obj.getAdminId(), cur_ts)
+
+                if obj.getAction() == 'heartbeat' and not newCollector:
+                    continue
+
+                COLLECTOR_LOGGERS[c_hash].info("%-27s Action: %-9s Admin Id: %s Hash Id: %s\n"
+                                               "    Connected Routers: %s", obj.getTimestamp(),
+                                               obj.getAction(), obj.getAdminId(), obj.getHashId(), obj.getRouters())
+
+                # clean up
+                if obj.getAction() == 'stopped':
+                    try:
+                        del COLLECTOR_ADMIN_ID[c_hash]
+                        del COLLECTOR_LOGGERS[c_hash]
+                        del ROUTER_LOGGERS[c_hash]
+                        del PEER_LOGGERS[c_hash]
+
+                        if c_hash in BMP_STAT_LOGGERS:
+                            del BMP_STAT_LOGGERS[c_hash]
+
+                        if c_hash in UNICAST_PREFIX_LOGGERS:
+                            del UNICAST_PREFIX_LOGGERS[c_hash]
+
+                        if c_hash in BASE_ATTR_LOGGERS:
+                            del BASE_ATTR_LOGGERS[c_hash]
+
+                        if c_hash in LS_NODE_LOGGERS:
+                            del LS_NODE_LOGGERS[c_hash]
+
+                        if c_hash in LS_LINK_LOGGERS:
+                            del LS_LINK_LOGGERS[c_hash]
+
+                        if c_hash in LS_PREFIX_LOGGERS:
+                            del LS_PREFIX_LOGGERS[c_hash]
+
+                        for r in BMP_RAW_FDS[c_hash]:
+                            for f in BMP_RAW_FDS[c_hash][r]:
+                                f.close()
+
+                        if c_hash in BMP_RAW_FDS:
+                            del BMP_RAW_FDS[c_hash]
+                    except:
+                        pass
+
+            except NameError as e:
+                print e
+                print "row = [%d] (%r)" % (len(row), row)
+
+            except:
+                pass
+
+
+def processRouterMsg(c_hash, data, fdir):
+    """ Process Router message
+
+    :param c_hash:      Collector Hash ID
+    :param data:        Message data to be consumed (should not contain headers)
+    :param fdir:        Directory where to store the parsed files
+    """
+    obj = router()
+
+    # Log messages
+    for row in data.split('\n'):
+        if (len(row)):
+            try:
+                obj.parse(row)
+
+                # Create logger
+                if c_hash not in ROUTER_LOGGERS or obj.getHashId() not in ROUTER_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash)
+
+                    try:
+                        os.makedirs(filepath)
+                    except:
+                        pass
+
+                    if c_hash not in ROUTER_LOGGERS:
+                        ROUTER_LOGGERS[c_hash] = {}
+
+                    ROUTER_LOGGERS[c_hash][obj.getHashId()] = initLogger('openbmp.parsed.router.' + obj.getHashId(),
+                                                                          os.path.join(filepath, 'routers.txt'))
+
+                if obj.getAction() == "init":
+                    ROUTER_LOGGERS[c_hash][obj.getHashId()].info(
+                            "%-27s Action: %-9s IP: %-16s Name: %s\n"
+                            "    Description: %s [%s]",
+                            obj.getTimestamp(), obj.getAction(), obj.getIpAddress(), obj.getName(),
+                            obj.getDescription(),obj.getInitData())
+
+                elif obj.getAction() == "term":
+                    ROUTER_LOGGERS[c_hash][obj.getHashId()].info(
+                            "%-27s Action: %-9s IP: %-16s Name: %s\n"
+                            "    Term Reason: [%d] %s [%s]",
+                            obj.getTimestamp(), obj.getAction(), obj.getIpAddress(), obj.getName(),
+                            obj.getTermCode(), obj.getTermReason(), obj.getTermData())
+                    del ROUTER_LOGGERS[c_hash][obj.getHashId()]
+
+                else:
+                    ROUTER_LOGGERS[c_hash][obj.getHashId()].info(
+                            "%-27s Action: %-9s IP: %-16s Name: %s",
+                            obj.getTimestamp(), obj.getAction(), obj.getIpAddress(), obj.getName())
+
+            except NameError as e:
+                print e
+                print "row = [%d] (%r)" % (len(row), row)
+
+            except:
+                pass
+
+
+def processPeerMsg(c_hash, data, fdir):
+    """ Process Peer message
+
+    :param c_hash:      Collector Hash ID
+    :param data:         Message data to be consumed (should not contain headers)
+    :param fdir:        Directory where to store the parsed files
+    """
+    obj = peer()
+
+    # Log messages
+    for row in data.split('\n'):
+        if (len(row)):
+            try:
+                obj.parse(row)
+
+                # Create logger
+                if c_hash not in PEER_LOGGERS or obj.getHashId() not in PEER_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash,
+                                            'ROUTER_' + resolveIp(obj.getRouterIp()))
+
+                    try:
+                        os.makedirs(filepath)
+                    except:
+                        pass
+
+                    if c_hash not in PEER_LOGGERS:
+                        PEER_LOGGERS[c_hash] = {}
+
+                    PEER_LOGGERS[c_hash][obj.getHashId()] = initLogger('openbmp.parsed.peer.' + obj.getHashId(),
+                                                                       os.path.join(filepath, 'peers.txt'))
+
+                if obj.getAction() == "up":
+                    PEER_LOGGERS[c_hash][obj.getHashId()].info(
+                            "%-27s Action: %-9s Name: %s [%s]\n"
+                            "    Remote IP: %s:%d AS: %u BGP Id: %s HD: %u RD: %s %s %s\n"
+                            "          Cap: %r\n"
+                            "    Local  IP: %s:%d AS: %u BGP Id: %s HD: %u\n"
+                            "          Cap: %r",
+                            obj.getTimestamp(), obj.getAction(), obj.getName(), obj.getInfoData(),
+                            obj.getRemoteIp(), obj.getRemotePort(), obj.getRemoteAsn(), obj.getRemoteBgpId(),
+                            obj.getRemoteHolddown(), obj.getPeerRd(),
+                            "L3VPN" if obj.isL3Vpn() else "",
+                            "Pre-Policy" if obj.isPrePolicy() else "Post-Policy",
+                            obj.getRecvCapabilities(),
+                            obj.getLocalIp(), obj.getLocalPort(), obj.getLocalAsn(), obj.getLocalBgpId(), obj.getAdvHolddown(),
+                            obj.getAdvCapabilities())
+
+                elif obj.getAction() == "down":
+                    PEER_LOGGERS[c_hash][obj.getHashId()].info(
+                            "%-27s Action: %-9s Name: %s\n"
+                            "    Remote IP: %s AS: %u BGP Id: %s RD: %s %s %s\n"
+                            "    Term Info: %d bgp: %d/%d %s",
+                            obj.getTimestamp(), obj.getAction(), obj.getName(),
+                            obj.getRemoteIp(), obj.getRemoteAsn(), obj.getRemoteBgpId(),obj.getPeerRd(),
+                            "L3VPN" if obj.isL3Vpn() else "",
+                            "Pre-Policy" if obj.isPrePolicy() else "Post-Policy",
+                            obj.getBmpReasonCode(), obj.getBgpErrorCode(), obj.getBgpSubErrorCode(), obj.getErrorText())
+
+                    del PEER_LOGGERS[c_hash][obj.getHashId()]
+
+                    if c_hash in BMP_STAT_LOGGERS and obj.getHashId() in BMP_STAT_LOGGERS[c_hash]:
+                        del BMP_STAT_LOGGERS[c_hash][obj.getHashId()]
+
+                    if c_hash in BASE_ATTR_LOGGERS and obj.getHashId() in BASE_ATTR_LOGGERS[c_hash]:
+                        del BASE_ATTR_LOGGERS[c_hash][obj.getHashId()]
+
+                    if c_hash in UNICAST_PREFIX_LOGGERS and obj.getHashId() in UNICAST_PREFIX_LOGGERS[c_hash]:
+                        del UNICAST_PREFIX_LOGGERS[c_hash][obj.getHashId()]
+
+                    if c_hash in LS_NODE_LOGGERS and obj.getHashId() in LS_NODE_LOGGERS[c_hash]:
+                        del LS_NODE_LOGGERS[c_hash][obj.getHashId()]
+
+                    if c_hash in LS_LINK_LOGGERS and obj.getHashId() in LS_LINK_LOGGERS[c_hash]:
+                        del LS_LINK_LOGGERS[c_hash][obj.getHashId()]
+
+                    if c_hash in LS_PREFIX_LOGGERS and obj.getHashId() in LS_PREFIX_LOGGERS[c_hash]:
+                        del LS_PREFIX_LOGGERS[c_hash][obj.getHashId()]
+
+
+                else:
+                    PEER_LOGGERS[c_hash][obj.getHashId()].info(
+                            "%-27s Action: %-9s Name: %s\n"
+                            "    Remote IP: %s AS: %u BGP Id: %s RD: %s %s %s",
+                            obj.getTimestamp(), obj.getAction(), obj.getName(),
+                            obj.getRemoteIp(), obj.getRemoteAsn(), obj.getRemoteBgpId(),obj.getPeerRd(),
+                            "L3VPN" if obj.isL3Vpn() else "",
+                            "Pre-Policy" if obj.isPrePolicy() else "Post-Policy")
+
+            except NameError as e:
+                print e
+                print "row = [%d] (%r)" % (len(row), row)
+
+
+def processBmpStatMsg(c_hash, data, fdir):
+    """ Process Bmp Stats message
+
+    :param c_hash:      Collector Hash ID
+    :param data:        Message data to be consumed (should not contain headers)
+    :param fdir:        Directory where to store the parsed files
+    """
+    obj = bmp_stat()
+
+    # Log messages
+    for row in data.split('\n'):
+        if (len(row)):
+            try:
+                obj.parse(row)
+
+                # Create logger
+                if c_hash not in BMP_STAT_LOGGERS or obj.getPeerHashId() not in BMP_STAT_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
+                                            'PEER_' + resolveIp(obj.getPeerIp()))
+
+                    try:
+                        os.makedirs(filepath)
+                    except:
+                        pass
+
+                    if c_hash not in BMP_STAT_LOGGERS:
+                        BMP_STAT_LOGGERS[c_hash] = {}
+
+                    BMP_STAT_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.bmp_stat.' + obj.getPeerHashId(),
+                                                                          os.path.join(filepath, 'bmp_stats.txt'))
+
+                BMP_STAT_LOGGERS[c_hash][obj.getPeerHashId()].info(
+                                "%-27s Pre-RIB: %-10lu Post-RIB: %-10lu Rejected: %-10u Update Dups: %-10u Withdraw Dups: %-10u\n"
+                                "    Invalid Cluster List: %-10u Invalid As Path: %-10u Invalid Originator Id: %-10u Invalid AS Confed: %-10u",
+                                obj.getTimestamp(),
+                                obj.getPrePolicyPrefixes(), obj.getPostPolicyPrefixes(), obj.getRejectedPrefixes(), obj.getKnownDupPrefixes(),
+                                obj.getKnownDupWithdrawPrefixes(), obj.getInvalidClusterListPrefixes(),
+                                obj.getInvalidAsPathPrefixes(), obj.getInvalidOriginatorIdPrefixes(),
+                                obj.getInvalidAsConffedPrefixes())
+
+            except NameError as e:
+                print e
+                print "row = [%d] (%r)" % (len(row), row)
+
+
+def processBaseAttributeMsg(c_hash, data, fdir):
+    """ Process Base attribute message
+
+    :param c_hash:      Collector Hash ID
+    :param data:        Message data to be consumed (should not contain headers)
+    :param fdir:        Directory where to store the parsed files
+    """
+    obj = base_attribute()
+
+    # Log messages
+    for row in data.split('\n'):
+        if (len(row)):
+            try:
+                obj.parse(row)
+
+                # Create logger
+                if c_hash not in BASE_ATTR_LOGGERS or obj.getPeerHashId() not in BASE_ATTR_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
+                                            'PEER_' + resolveIp(obj.getPeerIp()))
+
+                    try:
+                        os.makedirs(filepath)
+                    except:
+                        pass
+
+                    if c_hash not in BASE_ATTR_LOGGERS:
+                        BASE_ATTR_LOGGERS[c_hash] = {}
+
+                    BASE_ATTR_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.base_attribute.' + obj.getPeerHashId(),
+                                                                                os.path.join(filepath, 'base_attributes.txt'))
+
+                BASE_ATTR_LOGGERS[c_hash][obj.getPeerHashId()].info(
+                                "%-27s Origin AS: %-10u AS Count: %-6d NH: %-16s LP: %-3u MED: %-8u Origin: %s\n"
+                                "    Aggregator: %-18s %s ClusterList: %-24s Originator Id: %s\n"
+                                "    Path: %s %s %s",
+                                obj.getTimestamp(), obj.getOriginAs(), obj.getAsPathCount(), obj.getNexthop(),
+                                obj.getLocalPref(), obj.getMed(), obj.getOrigin(), obj.getAggregator(),
+                                "[ Atomic ]" if obj.isAttomicAggregate() else "",
+                                obj.getClusterList(), obj.getOriginatorId(), obj.getAsPath(),
+                                obj.getCommunityList() + '\n' if len(obj.getClusterList()) > 0 else "",
+                                obj.getExtCommunityList() + '\n' if len(obj.getExtCommunityList()) > 0 else "")
+
+            except NameError as e:
+                print "---------"
+                print e
+                print data
+                print "row = [%d] (%r)" % (len(row), row)
+
+
+def processUnicastPrefixMsg(c_hash, data, fdir):
+    """ Process Unicast prefix message
+
+    :param c_hash:      Collector Hash ID
+    :param data:        Message data to be consumed (should not contain headers)
+    :param fdir:        Directory where to store the parsed files
+    """
+    obj = unicast_prefix()
+
+    # Log messages
+    for row in data.split('\n'):
+        if (len(row)):
+            try:
+                obj.parse(row)
+
+                # Create logger
+                if c_hash not in UNICAST_PREFIX_LOGGERS or obj.getPeerHashId() not in UNICAST_PREFIX_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
+                                            'PEER_' + resolveIp(obj.getPeerIp()))
+
+                    try:
+                        os.makedirs(filepath)
+                    except:
+                        pass
+
+                    if c_hash not in UNICAST_PREFIX_LOGGERS:
+                        UNICAST_PREFIX_LOGGERS[c_hash] = {}
+
+                    UNICAST_PREFIX_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.unicast_prefix.' + obj.getPeerHashId(),
+                                                                                os.path.join(filepath, 'unicast_prefixes.txt'))
+
+                printAggLine = True if len(obj.getClusterList()) or len(obj.getAggregator()) or len(obj.getOriginatorId()) else False
+
+                UNICAST_PREFIX_LOGGERS[c_hash][obj.getPeerHashId()].info(
+                                "%-27s Prefix: %-40s Origin AS: %-10u\n"
+                                "           AS Count: %-6d NH: %-16s LP: %-3u MED: %-8u Origin: %s %s"
+                                "               Path: %s %s %s",
+                                obj.getTimestamp(), obj.getPrefix(),
+                                obj.getOriginAs(), obj.getAsPathCount(), obj.getNexthop(),
+                                obj.getLocalPref(), obj.getMed(), obj.getOrigin(),
+                                "         Aggregator: %s %s ClusterList: %s Originator Id: %s\n" % (
+                                                obj.getAggregator(),
+                                                "[ Atomic ]" if obj.isAtomicAggregate()
+                                                        else "",
+                                                obj.getClusterList(), obj.getOriginatorId()),
+                                obj.getAsPath(),
+                                "\n        Communities: " + obj.getCommunityList() + '\n' if len(obj.getCommunityList()) > 0 else "",
+                                "\n    Ext Communities: " + obj.getExtCommunityList() + '\n' if len(obj.getExtCommunityList()) > 0 else "")
+
+            except NameError as e:
+
+                print "++++++"
+                print e
+                print data
+                print "row = [%d] (%r)" % (len(row), row)
+
+
+def processLsNodeMsg(c_hash, data, fdir):
+    """ Process LS Node message
+
+    :param c_hash:      Collector Hash ID
+    :param data:        Message data to be consumed (should not contain headers)
+    :param fdir:        Directory where to store the parsed files
+    """
+    obj = ls_node()
+
+    # Log messages
+    for row in data.split('\n'):
+        if (len(row)):
+            try:
+                obj.parse(row)
+
+                # Create logger
+                if c_hash not in LS_NODE_LOGGERS or obj.getPeerHashId() not in LS_NODE_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
+                                            'PEER_' + resolveIp(obj.getPeerIp()))
+
+                    try:
+                        os.makedirs(filepath)
+                    except:
+                        pass
+
+                    if c_hash not in LS_NODE_LOGGERS:
+                        LS_NODE_LOGGERS[c_hash] = {}
+
+                    LS_NODE_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.ls_node.' + obj.getPeerHashId(),
+                                                                          os.path.join(filepath, 'ls_nodes.txt'))
+
+                LS_NODE_LOGGERS[c_hash][obj.getPeerHashId()].info(
+                                "%-27s RID: %-46s Hash Id: %-32s RoutingID: 0x%s Name: %s\n"
+                                "    Proto: %-10s LsId: 0x%s MT Id: %-7u Area: %s Flags: %s\n"
+                                "    AS Path: %s LP: %u MED: %u NH: %s",
+                                obj.getTimestamp(), obj.getIgpRouterId() + '/' + obj.getRouterId(),
+                                obj.getHashId(), obj.getRoutingId(), obj.getName(), obj.getProtocol(), obj.getLsId(),
+                                obj.getMtId(), obj.getOspfAreaId() if len(obj.getOspfAreaId()) else obj.getIsisAreaId(),
+                                obj.getFlags(), obj.getAsPath(), obj.getLocalPref(), obj.getMed(), obj.getNexthop())
+
+            except NameError as e:
+                print "----"
+                print e
+                print data
+                print "ls_node: row = [%d] (%r)" % (len(row), row)
+
+
+def processLsLinkMsg(c_hash, data, fdir):
+    """ Process LS Link message
+
+    :param c_hash:      Collector Hash ID
+    :param data:        Message data to be consumed (should not contain headers)
+    :param fdir:        Directory where to store the parsed files
+    """
+    obj = ls_link()
+
+    # Log messages
+    for row in data.split('\n'):
+        if (len(row)):
+            try:
+                obj.parse(row)
+
+                # Create logger
+                if c_hash not in LS_LINK_LOGGERS or obj.getPeerHashId() not in LS_LINK_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
+                                            'PEER_' + resolveIp(obj.getPeerIp()))
+
+                    try:
+                        os.makedirs(filepath)
+                    except:
+                        pass
+
+                    if c_hash not in LS_LINK_LOGGERS:
+                        LS_LINK_LOGGERS[c_hash] = {}
+
+                    LS_LINK_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.ls_link.' + obj.getPeerHashId(),
+                                                                          os.path.join(filepath, 'ls_links.txt'))
+
+                LS_LINK_LOGGERS[c_hash][obj.getPeerHashId()].info(
+                                "%-27s RID: %-46s Hash Id: %-32s RoutingID: 0x%s \n"
+                                "    Proto: %-10s LsId: 0x%s MT Id: %s Area: %s Adm Grp: %u SRLG: %s Name: %s\n"
+                                "    Metric: %u Link Id (local/remote): %u/%u Interface IP (local/remote): %s/%s"
+                                "    Node Hash Id (local/remote): %s/%s\n"
+                                "    AS Path: %s LP: %u MED: %u NH: %s %s",
+                                obj.getTimestamp(), obj.getIgpRouterId() + '/' + obj.getRouterId(),
+                                obj.getHashId(), obj.getRoutingId(), obj.getProtocol(), obj.getLsId(),
+                                obj.getMtId(), obj.getOspfAreaId() if len(obj.getOspfAreaId()) else obj.getIsisAreaId(),
+                                obj.getAdminGroup(), obj.getSrlg(), obj.getLinkName(),
+                                obj.getIgpMetric(),obj.getLocalLinkId(), obj.getRemoteLinkId(), obj.getInterfaceIp(),
+                                obj.getNeighborIp(),obj.getLocalNodeHashId(), obj.getRemoteNodeHashId(),
+                                obj.getAsPath(), obj.getLocalPref(), obj.getMed(),obj.getNexthop(),
+                                "\n    MPLS Proto: %s Protection: %s TE Metric: %u Max Link BW: %f Max Resv BW: %f Unresv BW: %s" %
+                                    (obj.getMplsProtoMask(), obj.getLinkProtection(), obj.getTeDefaultMetric(),
+                                     obj.getMaxLinkBw(), obj.getMaxResvBw(), obj.getUnreservedBw()) if obj.getTeDefaultMetric() else "")
+
+            except NameError as e:
+                print "----"
+                print e
+                print data
+                print "ls_link: row = [%d] (%r)" % (len(row), row)
+
+
+def processLsPrefixMsg(c_hash, data, fdir):
+    """ Process LS Prefix message
+
+    :param c_hash:      Collector Hash ID
+    :param data:        Message data to be consumed (should not contain headers)
+    :param fdir:        Directory where to store the parsed files
+    """
+    obj = ls_prefix()
+
+    # Log messages
+    for row in data.split('\n'):
+        if (len(row)):
+            try:
+                obj.parse(row)
+
+                # Create logger
+                if c_hash not in LS_PREFIX_LOGGERS or obj.getPeerHashId() not in LS_PREFIX_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
+                                            'PEER_' + resolveIp(obj.getPeerIp()))
+
+                    try:
+                        os.makedirs(filepath)
+                    except:
+                        pass
+
+                    if c_hash not in LS_PREFIX_LOGGERS:
+                        LS_PREFIX_LOGGERS[c_hash] = {}
+
+                    LS_PREFIX_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.ls_prefix.' + obj.getPeerHashId(),
+                                                                          os.path.join(filepath, 'ls_prefixes.txt'))
+
+                LS_PREFIX_LOGGERS[c_hash][obj.getPeerHashId()].info(
+                                "%-27s RID: %-46s Prefix: %-32s Hash Id: %-32s RoutingID: 0x%s \n"
+                                "    Proto: %-10s LsId: 0x%s MT Id: %s Area: %s %s %s\n"
+                                "    Metric: %u Flags: %s RTag: %u Ext RTag: 0x%s"
+                                "    Local Node Hash Id: %s AS Path: %s LP: %u MED: %u NH: %s",
+                                obj.getTimestamp(), obj.getIgpRouterId() + '/' + obj.getRouterId(),
+                                obj.getPrefix(), obj.getHashId(), obj.getRoutingId(), obj.getProtocol(), obj.getLsId(),
+                                obj.getMtId(), obj.getOspfAreaId() if len(obj.getOspfAreaId()) else obj.getIsisAreaId(),
+                                " Route Type: %s" % obj.getOspfRouteType() if len(obj.getOspfRouteType()) else "",
+                                " Fwd Addr: %s" % obj.getOspfFwdAddress() if len(obj.getOspfFwdAddress()) else "",
+                                obj.getIgpMetric(), obj.getIgpFlags(), obj.getRouteTag(), obj.getExtRouteTag(),
+                                obj.getLocalNodeHashId(), obj.getAsPath(), obj.getLocalPref(), obj.getMed(), obj.getNexthop())
+
+            except NameError as e:
+                print "----"
+                print e
+                print data
+                print "ls_prefix: row = [%d] (%r)" % (len(row), row)
+
+
+
+def processBmpRawMsg(c_hash, r_hash, r_ip, data, fdir):
+    """ Process BMP RAW message
+
+    :param c_hash:      Collector Hash ID
+    :param r_hash:      Router Hash ID
+    :param r_ip:        Router IP address
+    :param data:        Message data to be consumed (should not contain headers)
+    :param fdir:        Directory where to store the parsed files
+    """
+    # Create logger
+    if c_hash not in BMP_RAW_FDS or r_hash not in BMP_RAW_FDS[c_hash]:
+        filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(r_ip))
+
+        try:
+            os.makedirs(filepath)
+        except:
+            pass
+
+        if c_hash not in BMP_RAW_FDS:
+            BMP_RAW_FDS[c_hash] = {}
+
+        BMP_RAW_FDS[c_hash][r_hash] = open(filepath + '/bmp_feed.raw', "ab")
+
+    BMP_RAW_FDS[c_hash][r_hash].write(data)
+
+
+def processMessage(msg, fdir):
+    """ Process the message
+
+    :param msg:     Message consumed
+    :param fdir:         Directory where to store the parsed files
+
+    :return:
+    """
+    (headers, data) = msg.value.split("\n\n", 1)
+
+    obj = None
+
+    hdr = parsed_headers()
+    hdr.parse(headers)
+
+    if msg.topic == 'openbmp.parsed.collector':
+        processCollectorMsg(hdr.getCollectorHashId(), data, fdir)
+
+    elif msg.topic == 'openbmp.parsed.router':
+        processRouterMsg(hdr.getCollectorHashId(), data, fdir)
+
+    elif msg.topic == 'openbmp.parsed.peer':
+        processPeerMsg(hdr.getCollectorHashId(), data, fdir)
+
+    elif msg.topic == 'openbmp.parsed.bmp_stat':
+        processBmpStatMsg(hdr.getCollectorHashId(), data, fdir)
+
+    elif msg.topic == 'openbmp.parsed.base_attribute':
+        processBaseAttributeMsg(hdr.getCollectorHashId(), data, fdir)
+
+    elif msg.topic == 'openbmp.parsed.unicast_prefix':
+        processUnicastPrefixMsg(hdr.getCollectorHashId(), data, fdir)
+
+    elif msg.topic == 'openbmp.parsed.ls_node':
+        processLsNodeMsg(hdr.getCollectorHashId(), data, fdir)
+
+    elif msg.topic == 'openbmp.parsed.ls_link':
+        processLsLinkMsg(hdr.getCollectorHashId(), data, fdir)
+
+    elif msg.topic == 'openbmp.parsed.ls_prefix':
+        processLsPrefixMsg(hdr.getCollectorHashId(), data, fdir)
+
+    elif msg.topic == 'openbmp.bmp_raw':
+        processBmpRawMsg(hdr.getCollectorHashId(), hdr.getRouterHashId(), hdr.getRouterIp(), data, fdir)
+
+
+def initLogger(name, filename):
+    """ Initialize a new logger instance
+
+    :param name:        name of logger
+    :param filename:    Filename for the logger
+
+    :return: logger instance
+    """
+    logger = logging.getLogger(name)
+
+    for h in logger.handlers:
+        logger.removeHandler(h)
+
+    logger.setLevel(logging.INFO)
+
+
+    handler = logging.handlers.RotatingFileHandler(filename=filename,
+                                                   maxBytes=1024 * 1024 * 300,
+                                                   backupCount=20,
+                                                   delay=True)
+    formatter = logging.Formatter('%(message)s')
+    handler.setFormatter(formatter)
+
+    # Set the handler so we can remove it
+    logger._handler = handler
+
+    logger.addHandler(handler)
+
+    return logger
+
+def resolveIp(addr):
+    """ Resolves an IP address to FQDN.
+
+    :param addr:        IPv4/v6 address to resovle
+    :return: FQDN or IP address if FQDN unknown/not found
+    """
+    try:
+        return socket.gethostbyaddr(addr)[0]
+    except:
+        return addr
+
+def usage(prog):
+    """ Usage - Prints the usage for this program.
+
+        :param prog:  Program name
+    """
+    print ""
+    print "Usage: %s [OPTIONS] <directory>" % prog
+    print ""
+    print "<directory> is the directory where you want to store the data."
+    print "            Directory should already exist (e.g. /var/openbmp/files)"
+    print ""
+
+    print "OPTIONS:"
+    print "  -h, --help".ljust(30) + "Print this help menu"
+    print "  -b, --servers".ljust(30) + "Kafka bootstrap servers in the format of 'host:port[,...]'"
+    print "  --disable-bgpls".ljust(30) + "Disable BGP link-state logging"
+    print "  --disable-base_attr".ljust(30) + "Disable base attribute logging"
+    print "  --disable-unicast_prefix".ljust(30) + "Disable unicast prefix logging"
+    print "  --enable-bmp".ljust(30) + "Enable BMP RAW feed logging"
+    print "  -i, --interval".ljust(30) + "Heartbeat interval in seconds for collectors (Default is 14400/4 hours)"
+    print ""
+
+def parseCmdArgs(argv):
+    """ Parse commandline arguments
+
+        Usage is printed and program is terminated if there is an error.
+
+        :param argv:   ARGV as provided by sys.argv.  Arg 0 is the program name
+
+        :returns:  Configuration dictionary as::
+                {
+                    dir:           <path>  (Directory to store the flat/log files)
+                    servers:       [ list of servers ]  (List of the bootstrap servers)
+                    inc_ls:        True/False (include link state or not)
+                    inc_bmp:       True/False (include BMP raw feed or not)
+                    inc_base_attr: True/False (include base attribute logging)
+                    inc_unicast:   True/False (include unicast prefix logging)
+                    interval:      <seconds>  Interval in seconds for expected heartbeats
+                }
+    """
+    cfg = { 'dir': None,
+            'servers': [ 'localhost:9092' ],
+            'inc_ls': True,
+            'inc_bmp': False,
+            'inc_base_attr': True,
+            'inc_unicast': True,
+            'interval': 14430 }
+
+    if (len(argv) < 1):
+        usage(argv[0])
+        sys.exit(1)
+
+    try:
+        (opts, args) = getopt.getopt(argv[1:], "hb:i:",
+                                       ["help", "disable-bgpls", "disable-base_attr", "disable-unicast_prefix", "enable-bmp", "servers=", "interval="])
+
+        for o, a in opts:
+            if o in ("-h", "--help"):
+                usage(argv[0])
+                sys.exit(0)
+
+            elif o in ("-b", "--servers"):
+                cfg['servers'] = a.split()
+
+            elif o in ("-i", "--interval"):
+                cfg['interval'] = int(a) + 30
+
+            elif o in ("--disable-bgpls"):
+                cfg['inc_ls'] = False
+
+            elif o in ("--disable-base_attr"):
+                cfg['inc_base_attr'] = False
+
+            elif o in ("--disable-unicast_prefix"):
+                cfg['inc_unicast'] = False
+
+            elif o in ("--enable-bmp"):
+                cfg['inc_bmp'] = True
+
+            else:
+                usage(argv[0])
+                sys.exit(1)
+
+        # The last arg should be the directory
+        if len(args) <= 0:
+            print "ERROR: Missing directory; You must specify the directory as the last argument"
+            usage(argv[0])
+            sys.exit(1)
+
+        elif not os.path.exists(args[0]):
+            print "ERROR: Directory '%s' doesn't exist" % args[0]
+            sys.exit(1)
+        else:
+            cfg['dir'] = args[0]
+
+    except getopt.GetoptError as err:
+        print str(err)  # will print something like "option -a not recognized"
+        usage(argv[0])
+        sys.exit(2)
+
+    return cfg
+
+
+def main():
+    """ Main entry point for shell script """
+    cfg = parseCmdArgs(sys.argv)
+
+    # Enable to topics/feeds
+    topics = [ 'openbmp.parsed.collector', 'openbmp.parsed.router',
+               'openbmp.parsed.peer', 'openbmp.parsed.bmp_stat' ]
+
+    if (cfg['inc_base_attr']):
+        topics.append('openbmp.parsed.base_attribute')
+
+    if (cfg['inc_unicast']):
+        topics.append('openbmp.parsed.unicast_prefix')
+
+    if (cfg['inc_ls']):
+        topics.append('openbmp.parsed.ls_node')
+        topics.append('openbmp.parsed.ls_link')
+        topics.append('openbmp.parsed.ls_prefix')
+
+    if (cfg['inc_bmp']):
+        topics.append('openbmp.bmp_raw')
+
+    try:
+        # connect and bind to topics
+        print "Connecting to %s ... takes a minute to load offsets and topics, please wait" % cfg['servers']
+        consumer = kafka.KafkaConsumer(*topics,
+                                 bootstrap_servers=cfg['servers'],
+                                 client_id='openbmp-file-consumer-' + socket.gethostname(),
+                                 socket_timeout_ms=5000,
+                                 fetch_message_max_bytes=1024 * 1024 * 5,
+                                 group_id='openbmp-file-consumer-' + socket.gethostname(),
+                                 auto_commit_enable=True,
+                                 auto_commit_interval_ms=30 * 1000,
+                                 auto_offset_reset='largest')
+
+        print "Connected, now consuming"
+
+        while True:
+            for m in consumer.fetch_messages():
+                processMessage(m, cfg['dir'])
+                consumer.task_done(m)
+
+            # Check collector status
+            cur_ts = time.time()
+
+            for c in COLLECTOR_ADMIN_ID:
+                (aid, ts) = COLLECTOR_ADMIN_ID[c]
+
+                if (cur_ts - ts) >= cfg['interval']:
+                    COLLECTOR_LOGGERS[c].error("%10s | %27s | %32s | " % ("dead",
+                                               datetime.datetime.fromtimestamp(cur_ts).strftime("%Y-%m-%d %H:%M:%S.%f"),
+                                               aid))
+
+                    try:
+                        del COLLECTOR_LOGGERS[c]
+                        del COLLECTOR_ADMIN_ID[c]
+                        del ROUTER_LOGGERS[c]
+                        del PEER_LOGGERS[c]
+
+                        if c in BMP_STAT_LOGGERS:
+                            del BMP_STAT_LOGGERS[c]
+
+                        if c in UNICAST_PREFIX_LOGGERS:
+                            del UNICAST_PREFIX_LOGGERS[c]
+
+                        if c in BASE_ATTR_LOGGERS:
+                            del BASE_ATTR_LOGGERS[c]
+
+                        if (c in BMP_RAW_FDS):
+                            for r in BMP_RAW_FDS[c]:
+                                for f in BMP_RAW_FDS[c][r]:
+                                    f.close()
+                    except:
+                        pass
+
+                    break
+
+    except kafka.common.KafkaUnavailableError as err:
+        print "Kafka Error: %s" % str(err)
+
+    except KeyboardInterrupt:
+        print "User stop requested"
+
+
+if __name__ == '__main__':
+    main()
