@@ -9,6 +9,6 @@ setup(name='openbmp-file-consumer',
       author_email='tim@openbmp.org',
       url='',
       package_dir={'': 'src/site-packages'},
-      packages=['openbmp.parsed'],
+      packages=['openbmp'],
       scripts=['src/bin/openbmp-file-consumer']
      )

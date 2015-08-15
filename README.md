@@ -24,6 +24,9 @@ You can either run the code within the **git** directory or you can install it i
     sudo pip install python-snappy
     sudo pip install kafka-python
 
+> You might have to install '**pip**' if you don't already have that. You can do so using ```apt-get install python-pip python-dev```
+
+
 *See [Kafka-python Install Instructions](http://kafka-python.readthedocs.org/en/latest/install.html) for more details.*
 
 ### Install openbmp-file-consumer:
