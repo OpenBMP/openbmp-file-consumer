@@ -14,6 +14,7 @@ import calendar
 import getopt
 import sys
 import os
+import yaml
 import socket
 import logging
 import logging.handlers
@@ -55,6 +56,8 @@ LS_PREFIX_LOGGERS = {}
 #    Key = <collector hash>, Value = Dictionary (key = router hash_id, opened file descriptor)
 BMP_RAW_FDS = {}
 
+# Configuration
+CONFIG = {}
 
 
 def processCollectorMsg(c_hash, data, fdir):
@@ -684,10 +687,21 @@ def initLogger(name, filename):
     logger.setLevel(logging.INFO)
 
 
-    handler = logging.handlers.RotatingFileHandler(filename=filename,
-                                                   maxBytes=1024 * 1024 * 300,
-                                                   backupCount=20,
-                                                   delay=True)
+    if CONFIG['logging']['rotate'] == "bysize":
+        handler = logging.handlers.RotatingFileHandler(
+                            filename=filename,
+                            maxBytes=CONFIG['logging']['bysize']['maxBytes'],
+                            backupCount=CONFIG['logging']['bysize']['backupCount'],
+                            delay=True)
+
+    elif CONFIG['logging']['rotate'] == "bytime":
+        handler = logging.handlers.TimedRotatingFileHandler(
+                            filename=filename,
+                            when=CONFIG['logging']['bytime']['when'],
+                            interval=CONFIG['logging']['bytime']['interval'],
+                            backupCount=CONFIG['logging']['bytime']['backupCount'],
+                            delay=True)
+
     formatter = logging.Formatter('%(message)s')
     handler.setFormatter(formatter)
 
@@ -697,6 +711,7 @@ def initLogger(name, filename):
     logger.addHandler(handler)
 
     return logger
+
 
 def resolveIp(addr):
     """ Resolves an IP address to FQDN.
@@ -709,149 +724,201 @@ def resolveIp(addr):
     except:
         return addr
 
+
 def usage(prog):
     """ Usage - Prints the usage for this program.
 
         :param prog:  Program name
     """
     print ""
-    print "Usage: %s [OPTIONS] <directory>" % prog
-    print ""
-    print "<directory> is the directory where you want to store the data."
-    print "            Directory should already exist (e.g. /var/openbmp/files)"
+    print "Usage: %s [OPTIONS]" % prog
     print ""
 
     print "OPTIONS:"
     print "  -h, --help".ljust(30) + "Print this help menu"
-    print "  -b, --servers".ljust(30) + "Kafka bootstrap servers in the format of 'host:port[,...]'"
-    print "  --disable-bgpls".ljust(30) + "Disable BGP link-state logging"
-    print "  --disable-base_attr".ljust(30) + "Disable base attribute logging"
-    print "  --disable-unicast_prefix".ljust(30) + "Disable unicast prefix logging"
-    print "  --enable-bmp".ljust(30) + "Enable BMP RAW feed logging"
-    print "  -i, --interval".ljust(30) + "Heartbeat interval in seconds for collectors (Default is 14400/4 hours)"
+    print "  -c, --config".ljust(30) + "Config filename (default is %s/etc/openbmp-file-consumer.yml)" % sys.prefix
     print ""
 
+
+def load_config(cfg_filename):
+    """ Load and validate the configuration from YAML
+
+        Some defaults are applied if any settings are missing.
+    """
+    global CONFIG
+
+    try:
+        CONFIG = yaml.load(file(cfg_filename, 'r'))
+
+        # Validate the config and set defaults if undefined
+        if 'kafka' in CONFIG:
+            if 'servers' not in CONFIG['kafka']:
+                CONFIG['kafka']['servers'] = ['localhost:9092']
+            if 'client_id' not in CONFIG['kafka']:
+                CONFIG['kafka']['client_id'] = 'openbmp-file-consumer'
+            if 'group_id' not in CONFIG['kafka']:
+                CONFIG['kafka']['group_id'] = 'openbmp-file-consumer'
+            if 'offset_reset_largest' not in CONFIG['kafka']:
+                CONFIG['kafka']['offset_reset_largest'] = True
+
+        else:
+            CONFIG['kafka'] = {}
+            CONFIG['kafka']['servers'] = ['localhost:9092']
+            CONFIG['kafka']['client_id'] = 'openbmp-file-consumer'
+            CONFIG['kafka']['group_id'] = 'openbmp-file-consumer'
+            CONFIG['kafka']['offset_reset_largest'] = True
+
+        if 'topic' in CONFIG:
+            if 'bmp_raw' not in CONFIG['topic']:
+                CONFIG['topic']['bmp_raw'] = True
+            if 'link_state' not in CONFIG['topic']:
+                CONFIG['topic']['link_state'] = True
+            if 'base_attribute' not in CONFIG['topic']:
+                CONFIG['topic']['base_attribute'] = True
+            if 'unicast_prefix' not in CONFIG['topic']:
+                CONFIG['topic']['unicast_prefix'] = True
+
+        else:
+            CONFIG['topic'] = {}
+            CONFIG['topic']['bmp_raw'] = True
+            CONFIG['topic']['link_state'] = True
+            CONFIG['topic']['base_attribute'] = True
+            CONFIG['topic']['unicast_prefix'] = True
+
+        if 'collector' in CONFIG:
+            if 'heartbeat' in CONFIG['collector']:
+                if 'interval' not in CONFIG['collector']['heartbeat']:
+                    CONFIG['collector']['heartbeat']['interval'] = 14430
+            else:
+                CONFIG['collector'] = {'heartbeat': {'interval': 14430}}
+        else:
+            CONFIG['collector'] = {'heartbeat': {'interval': 14430}}
+
+        if 'logging' in CONFIG:
+            if 'base_path' not in CONFIG['logging']:
+                CONFIG['logging']['base_path'] = '/tmp/openbmp-log'
+
+            if not os.path.exists(CONFIG['logging']['base_path']):
+                print "Base path '%s' does not exist, attempting to create it" % CONFIG['logging']['base_path']
+                os.mkdir(CONFIG['logging']['base_path'], 0755)
+
+            if 'rotate' not in CONFIG['logging']:
+                CONFIG['logging']['rotate'] = 'bysize'
+
+            # Make sure the rotate config is present
+            if CONFIG['logging']['rotate'] not in CONFIG['logging']:
+               CONFIG['logging'] = {
+                        'base_path': '/var/openbmp-log',
+                        'bysize': {'maxBytes': 100000000, 'backupCount': 20},
+                        'rotate': 'bysize'
+                    }
+
+            # based on the rotate method, make sure required vars are defined
+            if 'bysize' in CONFIG['logging']['rotate']:
+                if 'maxBytes' not in CONFIG['logging']['bysize']:
+                    CONFIG['logging']['bysize']['maxBytes'] = 100000000
+                if 'backupCount' not in CONFIG['logging']['bysize']:
+                    CONFIG['logging']['bysize']['backupCount'] = 20
+
+            elif 'bytime' in CONFIG['logging']['rotate']:
+                if 'when' not in CONFIG['logging']['bytime']:
+                    CONFIG['logging']['bytime']['when'] = 'h'
+                if 'interval' not in CONFIG['logging']['bytime']:
+                    CONFIG['logging']['bytime']['interval'] = 48
+                if 'backupCount' not in CONFIG['logging']['bysize']:
+                    CONFIG['logging']['bytime']['backupCount'] = 20
+
+        else:
+            CONFIG['logging'] = {
+                        'base_path': '/tmp/openbmp-log',
+                        'bysize': {'maxBytes': 100000000, 'backupCount': 20},
+                        'rotate': 'bysize'
+                    }
+
+    except (IOError, yaml.YAMLError), e:
+        print ("Failed to load mapping config file: %r" % e)
+        if hasattr(e, 'problem_mark'):
+            mark = e.problem_mark
+            print ("error on line: %s, column: %s" % (mark.line+1, mark.column+1))
+
+        sys.exit(2)
+
+
 def parseCmdArgs(argv):
-    """ Parse commandline arguments
+    """ Parse commandline arguments and load the configuration file
 
         Usage is printed and program is terminated if there is an error.
 
         :param argv:   ARGV as provided by sys.argv.  Arg 0 is the program name
-
-        :returns:  Configuration dictionary as::
-                {
-                    dir:           <path>  (Directory to store the flat/log files)
-                    servers:       [ list of servers ]  (List of the bootstrap servers)
-                    inc_ls:        True/False (include link state or not)
-                    inc_bmp:       True/False (include BMP raw feed or not)
-                    inc_base_attr: True/False (include base attribute logging)
-                    inc_unicast:   True/False (include unicast prefix logging)
-                    interval:      <seconds>  Interval in seconds for expected heartbeats
-                }
     """
-    cfg = { 'dir': None,
-            'servers': [ 'localhost:9092' ],
-            'inc_ls': True,
-            'inc_bmp': False,
-            'inc_base_attr': True,
-            'inc_unicast': True,
-            'interval': 14430 }
-
-    if (len(argv) < 1):
-        usage(argv[0])
-        sys.exit(1)
+    cfg_filename = "%s/etc/openbmp-file-consumer.yml" % sys.prefix
 
     try:
-        (opts, args) = getopt.getopt(argv[1:], "hb:i:",
-                                       ["help", "disable-bgpls", "disable-base_attr", "disable-unicast_prefix", "enable-bmp", "servers=", "interval="])
+        (opts, args) = getopt.getopt(argv[1:], "hc:",
+                                       ["help", "config="])
 
         for o, a in opts:
             if o in ("-h", "--help"):
                 usage(argv[0])
                 sys.exit(0)
 
-            elif o in ("-b", "--servers"):
-                cfg['servers'] = a.split()
-
-            elif o in ("-i", "--interval"):
-                cfg['interval'] = int(a) + 30
-
-            elif o in ("--disable-bgpls"):
-                cfg['inc_ls'] = False
-
-            elif o in ("--disable-base_attr"):
-                cfg['inc_base_attr'] = False
-
-            elif o in ("--disable-unicast_prefix"):
-                cfg['inc_unicast'] = False
-
-            elif o in ("--enable-bmp"):
-                cfg['inc_bmp'] = True
+            elif o in ("-c", "--config"):
+                cfg_filename = a
 
             else:
                 usage(argv[0])
                 sys.exit(1)
 
-        # The last arg should be the directory
-        if len(args) <= 0:
-            print "ERROR: Missing directory; You must specify the directory as the last argument"
-            usage(argv[0])
-            sys.exit(1)
-
-        elif not os.path.exists(args[0]):
-            print "ERROR: Directory '%s' doesn't exist" % args[0]
-            sys.exit(1)
-        else:
-            cfg['dir'] = args[0]
+            load_config(cfg_filename)
 
     except getopt.GetoptError as err:
         print str(err)  # will print something like "option -a not recognized"
         usage(argv[0])
         sys.exit(2)
 
-    return cfg
-
 
 def main():
     """ Main entry point for shell script """
-    cfg = parseCmdArgs(sys.argv)
+    parseCmdArgs(sys.argv)
 
     # Enable to topics/feeds
     topics = [ 'openbmp.parsed.collector', 'openbmp.parsed.router',
-               'openbmp.parsed.peer', 'openbmp.parsed.bmp_stat' ]
+               'openbmp.parsed.peer', 'openbmp.parsed.bmp_stat']
 
-    if (cfg['inc_base_attr']):
+    if CONFIG['topic']['base_attribute']:
         topics.append('openbmp.parsed.base_attribute')
 
-    if (cfg['inc_unicast']):
+    if CONFIG['topic']['unicast_prefix']:
         topics.append('openbmp.parsed.unicast_prefix')
 
-    if (cfg['inc_ls']):
+    if CONFIG['topic']['link_state']:
         topics.append('openbmp.parsed.ls_node')
         topics.append('openbmp.parsed.ls_link')
         topics.append('openbmp.parsed.ls_prefix')
 
-    if (cfg['inc_bmp']):
+    if CONFIG['topic']['bmp_raw']:
         topics.append('openbmp.bmp_raw')
 
     try:
         # connect and bind to topics
-        print "Connecting to %s ... takes a minute to load offsets and topics, please wait" % cfg['servers']
-        consumer = kafka.KafkaConsumer(*topics,
-                                 bootstrap_servers=cfg['servers'],
-                                 client_id='openbmp-file-consumer-' + socket.gethostname(),
-                                 socket_timeout_ms=5000,
-                                 fetch_message_max_bytes=1024 * 1024 * 5,
-                                 group_id='openbmp-file-consumer-' + socket.gethostname(),
-                                 auto_commit_enable=True,
-                                 auto_commit_interval_ms=30 * 1000,
-                                 auto_offset_reset='largest')
+        print "Connecting to %r ... takes a minute to load offsets and topics, please wait" % CONFIG['kafka']['servers']
+        consumer = kafka.KafkaConsumer(
+                            *topics,
+                            bootstrap_servers=CONFIG['kafka']['servers'],
+                            client_id=CONFIG['kafka']['client_id'],
+                            socket_timeout_ms=5000,
+                            fetch_message_max_bytes=int(1024 * 1024 * 5),
+                            group_id=CONFIG['kafka']['group_id'],
+                            auto_commit_enable=True,
+                            auto_commit_interval_ms=int(30 * 1000),
+                            auto_offset_reset="largest" if CONFIG['kafka']['offset_reset_largest'] else "smallest")
 
         print "Connected, now consuming"
+        print "Logs are stored under '%s'" % CONFIG['logging']['base_path']
 
         while True:
             for m in consumer.fetch_messages():
-                processMessage(m, cfg['dir'])
+                processMessage(m, CONFIG['logging']['base_path'])
                 consumer.task_done(m)
 
             # Check collector status
@@ -860,7 +927,7 @@ def main():
             for c in COLLECTOR_ADMIN_ID:
                 (aid, ts) = COLLECTOR_ADMIN_ID[c]
 
-                if (cur_ts - ts) >= cfg['interval']:
+                if (cur_ts - ts) >= CONFIG['collector']['heartbeat']['interval']:
                     COLLECTOR_LOGGERS[c].error("%10s | %27s | %32s | " % ("dead",
                                                datetime.datetime.fromtimestamp(cur_ts).strftime("%Y-%m-%d %H:%M:%S.%f"),
                                                aid))
@@ -880,7 +947,7 @@ def main():
                         if c in BASE_ATTR_LOGGERS:
                             del BASE_ATTR_LOGGERS[c]
 
-                        if (c in BMP_RAW_FDS):
+                        if c in BMP_RAW_FDS:
                             for r in BMP_RAW_FDS[c]:
                                 for f in BMP_RAW_FDS[c][r]:
                                     f.close()

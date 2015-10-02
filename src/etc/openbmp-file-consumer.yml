@@ -1,0 +1,41 @@
+# OpenBMP file consumer configuration
+
+kafka:
+  servers             : ['bmp-dev.openbmp.org:9092']
+  client_id           : 'openbmp-file-consumer'
+  group_id            : 'openbmp-file-consumer'
+  offset_reset_largest: True
+
+# Topics to log/store
+topic:
+  bmp_raw         : True
+  link_state      : True
+  base_attribute  : True
+  unicast_prefix  : True
+
+collector:
+  heartbeat:
+    # Heartbeat interval in seconds
+    interval: 14430
+
+logging:
+  base_path: '/tmp/openbmp-log'
+
+  # RotatingFileHandler config options
+  #    See https://docs.python.org/2/library/logging.handlers.html#rotatingfilehandler
+  bysize:
+    maxBytes    : 1000000
+    backupCount : 20
+
+  # TimedRotatingFileHandler config options
+  #    See https://docs.python.org/2/library/logging.handlers.html#timedrotatingfilehandler
+  bytime:
+    when        : 'h'
+    interval    : 4
+    backupCount : 24
+
+  # Set rotate to either 'bysize' or 'bytime'
+  rotate: 'bysize'
+
+
+

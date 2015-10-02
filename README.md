@@ -20,9 +20,10 @@ You can either run the code within the **git** directory or you can install it i
 
 ### Install Dependancies:
     
-    sudo apt-get install libsnappy-dev
+    sudo apt-get install libsnappy-dev 
     sudo pip install python-snappy
     sudo pip install kafka-python
+    sudo pip install pyyaml
 
 > You might have to install '**pip**' if you don't already have that. You can do so using ```apt-get install python-pip python-dev```
 
@@ -44,36 +45,33 @@ If you install the python code, then you should be able to run from a terminal
     
 If you are running from within the **git** directory, you can run it as follows:
 
-    PYTHONPATH=./src/site-packages python src/bin/openbmp-file-consumer -b <host e.g. kafka.openbmp.org> <base path for parsed message e.g. /var/openbmp>
+    PYTHONPATH=./src/site-packages python src/bin/openbmp-file-consumer -c src/etc/openbmp-file-consumer.yml
 
     
 #### Usage
 ```
-Usage: openbmp-file-consumer [OPTIONS] <directory>
-
-<directory> is the directory where you want to store the data.
-            Directory should already exist (e.g. /var/openbmp/files)
+Usage: src/bin/openbmp-file-consumer [OPTIONS]
 
 OPTIONS:
   -h, --help                  Print this help menu
-  -b, --servers               Kafka bootstrap servers in the format of 'host:port[,...]'
-  --disable-bgpls             Disable BGP link-state logging
-  --disable-base_attr         Disable base attribute logging
-  --disable-unicast_prefix    Disable unicast prefix logging
-  --enable-bmp                Enable BMP RAW feed logging
-  -i, --interval              Heartbeat interval in seconds for collectors (Default is 14400/4 hours)
+  -c, --config                Config filename (default is sys.prefix/etc/openbmp-file-consumer.yml)
 ```
 
-> ##### NOTE
-> To enable BMP RAW binary stream logging use the **--enable-bmp** option.
+#### Configuration
+Configuration is in YAML format via the **openbmp-file-consumer.yml** file.  
+
 
 #### Example
 
 ```
-tievens$ PYTHONPATH=./src/site-packages python src/bin/openbmp-file-consumer -b bmp-dev.openbmp.org -i 3 /var/tmp/openbmp
-Connecting to ['bmp-dev.openbmp.org'] ... takes a minute to load offsets and topics, please wait
+tievens$ PYTHONPATH=./src/site-packages python src/bin/openbmp-file-consumer -c src/etc/openbmp-file-consumer.yml
+Base path '/tmp/openbmp-log' does not exist, attempting to create it
+Connecting to ['bmp-dev.openbmp.org:9092'] ... takes a minute to load offsets and topics, please wait
 Connected, now consuming
+Logs are stored under '/tmp/openbmp-log'
+```
 
+```
 tievens$ tail -f /var/tmp/openbmp/COLLECTOR_e086aa137fa19f67d27b39d0eca18610/ROUTER_x.x.x.x/PEER_wa1.level3.net/unicast_prefixes.txt 
  
 2015-08-07 17:01:30.439892  Prefix: 63.77.246.0/24                           Origin AS: 705       
