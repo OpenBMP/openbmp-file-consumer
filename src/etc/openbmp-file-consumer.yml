@@ -24,7 +24,7 @@ logging:
   # RotatingFileHandler config options
   #    See https://docs.python.org/2/library/logging.handlers.html#rotatingfilehandler
   bysize:
-    maxBytes    : 1000000
+    maxBytes    : 100000000
     backupCount : 20
 
   # TimedRotatingFileHandler config options
