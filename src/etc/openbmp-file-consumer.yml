@@ -16,7 +16,7 @@ topic:
 collector:
   heartbeat:
     # Heartbeat interval in seconds
-    interval: 14430
+    interval: 300
 
 logging:
   base_path: '/tmp/openbmp-log'
@@ -28,6 +28,7 @@ logging:
     backupCount : 20
 
   # TimedRotatingFileHandler config options
+  #    This is used for BMP RAW, regardless of the rotate config below
   #    See https://docs.python.org/2/library/logging.handlers.html#timedrotatingfilehandler
   bytime:
     when        : 'h'
@@ -35,7 +36,7 @@ logging:
     backupCount : 24
 
   # Set rotate to either 'bysize' or 'bytime'
-  rotate: 'bysize'
+  rotate: 'bytime'
 
 
 

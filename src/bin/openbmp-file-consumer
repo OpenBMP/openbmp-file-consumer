@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """OpenBMP basic file consumer
 
   Copyright (c) 2013-2015 Cisco Systems, Inc. and others.  All rights reserved.
@@ -19,7 +20,9 @@ import socket
 import logging
 import logging.handlers
 import kafka
+import traceback
 
+from openbmp.RawTimedRotatingFileHandler import RawTimedRotatingFileHandler
 from openbmp.parsed.headers import headers as parsed_headers
 from openbmp.parsed.collector import collector
 from openbmp.parsed.router import router
@@ -53,8 +56,8 @@ LS_LINK_LOGGERS = {}
 LS_PREFIX_LOGGERS = {}
 
 # BMP RAW hash to keep track of opened files
-#    Key = <collector hash>, Value = Dictionary (key = router hash_id, opened file descriptor)
-BMP_RAW_FDS = {}
+#    Key = <collector hash>, Value = Dictionary (key = router hash_id, value = logger)
+BMP_RAW_LOGGERS = {}
 
 # Configuration
 CONFIG = {}
@@ -126,12 +129,12 @@ def processCollectorMsg(c_hash, data, fdir):
                         if c_hash in LS_PREFIX_LOGGERS:
                             del LS_PREFIX_LOGGERS[c_hash]
 
-                        for r in BMP_RAW_FDS[c_hash]:
-                            for f in BMP_RAW_FDS[c_hash][r]:
+                        for r in BMP_RAW_LOGGERS[c_hash]:
+                            for f in BMP_RAW_LOGGERS[c_hash][r]:
                                 f.close()
 
-                        if c_hash in BMP_RAW_FDS:
-                            del BMP_RAW_FDS[c_hash]
+                        if c_hash in BMP_RAW_LOGGERS:
+                            del BMP_RAW_LOGGERS[c_hash]
                     except:
                         pass
 
@@ -598,7 +601,6 @@ def processLsPrefixMsg(c_hash, data, fdir):
                 print "ls_prefix: row = [%d] (%r)" % (len(row), row)
 
 
-
 def processBmpRawMsg(c_hash, r_hash, r_ip, data, fdir):
     """ Process BMP RAW message
 
@@ -609,7 +611,7 @@ def processBmpRawMsg(c_hash, r_hash, r_ip, data, fdir):
     :param fdir:        Directory where to store the parsed files
     """
     # Create logger
-    if c_hash not in BMP_RAW_FDS or r_hash not in BMP_RAW_FDS[c_hash]:
+    if c_hash not in BMP_RAW_LOGGERS or r_hash not in BMP_RAW_LOGGERS[c_hash]:
         filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(r_ip))
 
         try:
@@ -617,12 +619,14 @@ def processBmpRawMsg(c_hash, r_hash, r_ip, data, fdir):
         except:
             pass
 
-        if c_hash not in BMP_RAW_FDS:
-            BMP_RAW_FDS[c_hash] = {}
+        if c_hash not in BMP_RAW_LOGGERS:
+            BMP_RAW_LOGGERS[c_hash] = {}
 
-        BMP_RAW_FDS[c_hash][r_hash] = open(filepath + '/bmp_feed.raw', "ab")
+        BMP_RAW_LOGGERS[c_hash][r_hash] = init_raw_logger("openbmp.bmp_raw." + r_hash,
+                                                          os.path.join(filepath, "bmp_feed.raw"))
 
-    BMP_RAW_FDS[c_hash][r_hash].write(data)
+    if BMP_RAW_LOGGERS[c_hash][r_hash]:
+        BMP_RAW_LOGGERS[c_hash][r_hash].info(data)
 
 
 def processMessage(msg, fdir):
@@ -633,42 +637,81 @@ def processMessage(msg, fdir):
 
     :return:
     """
-    (headers, data) = msg.value.split("\n\n", 1)
+    try:
+        (headers, data) = msg.value.split("\n\n", 1)
 
-    obj = None
+        obj = None
 
-    hdr = parsed_headers()
-    hdr.parse(headers)
+        hdr = parsed_headers()
+        hdr.parse(headers)
 
-    if msg.topic == 'openbmp.parsed.collector':
-        processCollectorMsg(hdr.getCollectorHashId(), data, fdir)
+        if msg.topic == 'openbmp.parsed.collector':
+            processCollectorMsg(hdr.getCollectorHashId(), data, fdir)
 
-    elif msg.topic == 'openbmp.parsed.router':
-        processRouterMsg(hdr.getCollectorHashId(), data, fdir)
+        elif msg.topic == 'openbmp.parsed.router':
+            processRouterMsg(hdr.getCollectorHashId(), data, fdir)
 
-    elif msg.topic == 'openbmp.parsed.peer':
-        processPeerMsg(hdr.getCollectorHashId(), data, fdir)
+        elif msg.topic == 'openbmp.parsed.peer':
+            processPeerMsg(hdr.getCollectorHashId(), data, fdir)
 
-    elif msg.topic == 'openbmp.parsed.bmp_stat':
-        processBmpStatMsg(hdr.getCollectorHashId(), data, fdir)
+        elif msg.topic == 'openbmp.parsed.bmp_stat':
+            processBmpStatMsg(hdr.getCollectorHashId(), data, fdir)
 
-    elif msg.topic == 'openbmp.parsed.base_attribute':
-        processBaseAttributeMsg(hdr.getCollectorHashId(), data, fdir)
+        elif msg.topic == 'openbmp.parsed.base_attribute':
+            processBaseAttributeMsg(hdr.getCollectorHashId(), data, fdir)
 
-    elif msg.topic == 'openbmp.parsed.unicast_prefix':
-        processUnicastPrefixMsg(hdr.getCollectorHashId(), data, fdir)
+        elif msg.topic == 'openbmp.parsed.unicast_prefix':
+            processUnicastPrefixMsg(hdr.getCollectorHashId(), data, fdir)
 
-    elif msg.topic == 'openbmp.parsed.ls_node':
-        processLsNodeMsg(hdr.getCollectorHashId(), data, fdir)
+        elif msg.topic == 'openbmp.parsed.ls_node':
+            processLsNodeMsg(hdr.getCollectorHashId(), data, fdir)
 
-    elif msg.topic == 'openbmp.parsed.ls_link':
-        processLsLinkMsg(hdr.getCollectorHashId(), data, fdir)
+        elif msg.topic == 'openbmp.parsed.ls_link':
+            processLsLinkMsg(hdr.getCollectorHashId(), data, fdir)
 
-    elif msg.topic == 'openbmp.parsed.ls_prefix':
-        processLsPrefixMsg(hdr.getCollectorHashId(), data, fdir)
+        elif msg.topic == 'openbmp.parsed.ls_prefix':
+            processLsPrefixMsg(hdr.getCollectorHashId(), data, fdir)
 
-    elif msg.topic == 'openbmp.bmp_raw':
-        processBmpRawMsg(hdr.getCollectorHashId(), hdr.getRouterHashId(), hdr.getRouterIp(), data, fdir)
+        elif msg.topic == 'openbmp.bmp_raw':
+            processBmpRawMsg(hdr.getCollectorHashId(), hdr.getRouterHashId(), hdr.getRouterIp(), data, fdir)
+
+    except:
+        print "ERROR processing message: "
+        traceback.print_exc()
+        print msg
+
+
+def init_raw_logger(name, filename):
+    """ Initialize a new logger instance
+
+    :param name:        name of logger
+    :param filename:    Filename for the logger
+
+    :return: logger instance or None if config is missing
+    """
+    logger = None
+
+    if CONFIG['logging']['bytime']['when']:
+        logger = logging.getLogger(name)
+
+        for h in logger.handlers:
+            logger.removeHandler(h)
+
+        logger.setLevel(logging.INFO)
+
+        handler = RawTimedRotatingFileHandler(
+            filename=filename,
+            when=CONFIG['logging']['bytime']['when'],
+            interval=CONFIG['logging']['bytime']['interval'],
+            backupCount=CONFIG['logging']['bytime']['backupCount'],
+            delay=True)
+
+        # Set the handler so we can remove it
+        logger._handler = handler
+
+        logger.addHandler(handler)
+
+    return logger
 
 
 def initLogger(name, filename):
@@ -685,7 +728,6 @@ def initLogger(name, filename):
         logger.removeHandler(h)
 
     logger.setLevel(logging.INFO)
-
 
     if CONFIG['logging']['rotate'] == "bysize":
         handler = logging.handlers.RotatingFileHandler(
@@ -906,20 +948,17 @@ def main():
                             *topics,
                             bootstrap_servers=CONFIG['kafka']['servers'],
                             client_id=CONFIG['kafka']['client_id'],
-                            socket_timeout_ms=5000,
-                            fetch_message_max_bytes=int(1024 * 1024 * 5),
                             group_id=CONFIG['kafka']['group_id'],
-                            auto_commit_enable=True,
-                            auto_commit_interval_ms=int(30 * 1000),
+                            enable_auto_commit=True,
+                            auto_commit_interval_ms=1000,
                             auto_offset_reset="largest" if CONFIG['kafka']['offset_reset_largest'] else "smallest")
 
         print "Connected, now consuming"
         print "Logs are stored under '%s'" % CONFIG['logging']['base_path']
 
         while True:
-            for m in consumer.fetch_messages():
+            for m in consumer:
                 processMessage(m, CONFIG['logging']['base_path'])
-                consumer.task_done(m)
 
             # Check collector status
             cur_ts = time.time()
@@ -947,9 +986,9 @@ def main():
                         if c in BASE_ATTR_LOGGERS:
                             del BASE_ATTR_LOGGERS[c]
 
-                        if c in BMP_RAW_FDS:
-                            for r in BMP_RAW_FDS[c]:
-                                for f in BMP_RAW_FDS[c][r]:
+                        if c in BMP_RAW_LOGGERS:
+                            for r in BMP_RAW_LOGGERS[c]:
+                                for f in BMP_RAW_LOGGERS[c][r]:
                                     f.close()
                     except:
                         pass
