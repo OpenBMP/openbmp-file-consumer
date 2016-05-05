@@ -911,7 +911,7 @@ def parseCmdArgs(argv):
                 usage(argv[0])
                 sys.exit(1)
 
-            load_config(cfg_filename)
+        load_config(cfg_filename)
 
     except getopt.GetoptError as err:
         print str(err)  # will print something like "option -a not recognized"
