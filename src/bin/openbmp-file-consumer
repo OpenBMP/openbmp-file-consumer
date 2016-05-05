@@ -878,7 +878,7 @@ def load_config(cfg_filename):
                     }
 
     except (IOError, yaml.YAMLError), e:
-        print ("Failed to load mapping config file: %r" % e)
+        print ("Failed to load mapping config file %s : %r" % (cfg_filename, e))
         if hasattr(e, 'problem_mark'):
             mark = e.problem_mark
             print ("error on line: %s, column: %s" % (mark.line+1, mark.column+1))
