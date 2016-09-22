@@ -23,6 +23,13 @@ import kafka
 import traceback
 
 from openbmp.RawTimedRotatingFileHandler import RawTimedRotatingFileHandler
+
+from openbmp.api.parsed.message import Message
+from openbmp.api.parsed.message import Router
+from openbmp.api.parsed.message import Collector
+from openbmp.api.parsed.message import Peer
+
+"""
 from openbmp.parsed.headers import headers as parsed_headers
 from openbmp.parsed.collector import collector
 from openbmp.parsed.router import router
@@ -33,6 +40,8 @@ from openbmp.parsed.bmp_stat import bmp_stat
 from openbmp.parsed.ls_node import ls_node
 from openbmp.parsed.ls_link import ls_link
 from openbmp.parsed.ls_prefix import ls_prefix
+"""
+
 
 
 # Collector logger hash to keep track of file loggers for collector object/messages
@@ -63,14 +72,17 @@ BMP_RAW_LOGGERS = {}
 CONFIG = {}
 
 
-def processCollectorMsg(c_hash, data, fdir):
+def processCollectorMsg(msg, fdir):
     """ Process collector message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = collector()
+    obj = Collector(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
+
     newCollector = False
 
     # Create logger if new
@@ -87,24 +99,22 @@ def processCollectorMsg(c_hash, data, fdir):
         newCollector = True
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Save the collector admin ID to hash id
-                cur_ts = calendar.timegm(datetime.datetime.strptime(obj.getTimestamp(), "%Y-%m-%d %H:%M:%S.%f").timetuple())
-                COLLECTOR_ADMIN_ID[c_hash] = (obj.getAdminId(), cur_ts)
+                cur_ts = calendar.timegm(datetime.datetime.strptime(row['timestamp'], "%Y-%m-%d %H:%M:%S.%f").timetuple())
+                COLLECTOR_ADMIN_ID[c_hash] = (row['admin_id'], cur_ts)
 
-                if obj.getAction() == 'heartbeat' and not newCollector:
+                if row['action'] == 'heartbeat' and not newCollector:
                     continue
 
                 COLLECTOR_LOGGERS[c_hash].info("%-27s Action: %-9s Admin Id: %s Hash Id: %s\n"
-                                               "    Connected Routers: %s", obj.getTimestamp(),
-                                               obj.getAction(), obj.getAdminId(), obj.getHashId(), obj.getRouters())
+                                               "    Connected Routers: %s", row['timestamp'],
+                                               row['action'], row['admin_id'], row['hash'], row['routers'])
 
                 # clean up
-                if obj.getAction() == 'stopped':
+                if row['action'] == 'stopped':
                     try:
                         del COLLECTOR_ADMIN_ID[c_hash]
                         del COLLECTOR_LOGGERS[c_hash]
@@ -146,23 +156,23 @@ def processCollectorMsg(c_hash, data, fdir):
                 pass
 
 
-def processRouterMsg(c_hash, data, fdir):
+def processRouterMsg(msg, fdir):
     """ Process Router message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = router()
+    obj = Router()
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in ROUTER_LOGGERS or obj.getHashId() not in ROUTER_LOGGERS[c_hash]:
+                if c_hash not in ROUTER_LOGGERS or row['hash'] not in ROUTER_LOGGERS[c_hash]:
                     filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash)
 
                     try:
@@ -173,28 +183,28 @@ def processRouterMsg(c_hash, data, fdir):
                     if c_hash not in ROUTER_LOGGERS:
                         ROUTER_LOGGERS[c_hash] = {}
 
-                    ROUTER_LOGGERS[c_hash][obj.getHashId()] = initLogger('openbmp.parsed.router.' + obj.getHashId(),
+                    ROUTER_LOGGERS[c_hash][row['hash']] = initLogger('openbmp.parsed.router.' + row['hash'],
                                                                           os.path.join(filepath, 'routers.txt'))
 
-                if obj.getAction() == "init":
-                    ROUTER_LOGGERS[c_hash][obj.getHashId()].info(
+                if row['action'] == "init":
+                    ROUTER_LOGGERS[c_hash][row['hash']].info(
                             "%-27s Action: %-9s IP: %-16s Name: %s\n"
                             "    Description: %s [%s]",
-                            obj.getTimestamp(), obj.getAction(), obj.getIpAddress(), obj.getName(),
-                            obj.getDescription(),obj.getInitData())
+                            row['timestamp'], row['action'], row['ip_address'], row['name'],
+                            row['description'], row['init_data'])
 
-                elif obj.getAction() == "term":
-                    ROUTER_LOGGERS[c_hash][obj.getHashId()].info(
+                elif row['action'] == "term":
+                    ROUTER_LOGGERS[c_hash][row['hash']].info(
                             "%-27s Action: %-9s IP: %-16s Name: %s\n"
                             "    Term Reason: [%d] %s [%s]",
-                            obj.getTimestamp(), obj.getAction(), obj.getIpAddress(), obj.getName(),
-                            obj.getTermCode(), obj.getTermReason(), obj.getTermData())
-                    del ROUTER_LOGGERS[c_hash][obj.getHashId()]
+                            row['timestamp'], row['action'], row['ip_address'], row['name'],
+                            row['term_code'], row['term_reason'], row['term_data'])
+                    del ROUTER_LOGGERS[c_hash][row['hash']]
 
                 else:
-                    ROUTER_LOGGERS[c_hash][obj.getHashId()].info(
+                    ROUTER_LOGGERS[c_hash][row['hash']].info(
                             "%-27s Action: %-9s IP: %-16s Name: %s",
-                            obj.getTimestamp(), obj.getAction(), obj.getIpAddress(), obj.getName())
+                        row['timestamp'], row['action'], row['ip_address'], row['name'])
 
             except NameError as e:
                 print e
@@ -204,25 +214,25 @@ def processRouterMsg(c_hash, data, fdir):
                 pass
 
 
-def processPeerMsg(c_hash, data, fdir):
+def processPeerMsg(msg, fdir):
     """ Process Peer message
 
-    :param c_hash:      Collector Hash ID
-    :param data:         Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = peer()
+    obj = Peer()
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in PEER_LOGGERS or obj.getHashId() not in PEER_LOGGERS[c_hash]:
+                if c_hash not in PEER_LOGGERS or row['hash'] not in PEER_LOGGERS[c_hash]:
                     filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash,
-                                            'ROUTER_' + resolveIp(obj.getRouterIp()))
+                                            'ROUTER_' + resolveIp(row['hash']))
 
                     try:
                         os.makedirs(filepath)
@@ -232,65 +242,65 @@ def processPeerMsg(c_hash, data, fdir):
                     if c_hash not in PEER_LOGGERS:
                         PEER_LOGGERS[c_hash] = {}
 
-                    PEER_LOGGERS[c_hash][obj.getHashId()] = initLogger('openbmp.parsed.peer.' + obj.getHashId(),
+                    PEER_LOGGERS[c_hash][row['hash']] = initLogger('openbmp.parsed.peer.' + row['hash'],
                                                                        os.path.join(filepath, 'peers.txt'))
 
-                if obj.getAction() == "up":
-                    PEER_LOGGERS[c_hash][obj.getHashId()].info(
+                if row['action'] == "up":
+                    PEER_LOGGERS[c_hash][row['hash']].info(
                             "%-27s Action: %-9s Name: %s [%s]\n"
                             "    Remote IP: %s:%d AS: %u BGP Id: %s HD: %u RD: %s %s %s\n"
                             "          Cap: %r\n"
                             "    Local  IP: %s:%d AS: %u BGP Id: %s HD: %u\n"
                             "          Cap: %r",
-                            obj.getTimestamp(), obj.getAction(), obj.getName(), obj.getInfoData(),
-                            obj.getRemoteIp(), obj.getRemotePort(), obj.getRemoteAsn(), obj.getRemoteBgpId(),
-                            obj.getRemoteHolddown(), obj.getPeerRd(),
-                            "L3VPN" if obj.isL3Vpn() else "",
-                            "Pre-Policy" if obj.isPrePolicy() else "Post-Policy",
-                            obj.getRecvCapabilities(),
-                            obj.getLocalIp(), obj.getLocalPort(), obj.getLocalAsn(), obj.getLocalBgpId(), obj.getAdvHolddown(),
-                            obj.getAdvCapabilities())
+                            row['timestamp'], row['action'], row['name'], row['info_data'],
+                            row['remote_ip'], row['remote_port'], row['remote_asn'], row['remote_bgp_id'],
+                            row['remote_holddown'], row['peer_rd'],
+                            "L3VPN" if row['isL3VPN'] else "",
+                            "Pre-Policy" if row['isPrePolicy'] else "Post-Policy",
+                            row['recv_cap'], row['local_ip'], row['local_port'],
+                            row['local_asn'], row['local_bgp_id'], row['adv_holddown'],
+                            row['adv_cap'])
 
-                elif obj.getAction() == "down":
-                    PEER_LOGGERS[c_hash][obj.getHashId()].info(
+                elif row['action'] == "down":
+                    PEER_LOGGERS[c_hash][row['hash']].info(
                             "%-27s Action: %-9s Name: %s\n"
                             "    Remote IP: %s AS: %u BGP Id: %s RD: %s %s %s\n"
                             "    Term Info: %d bgp: %d/%d %s",
-                            obj.getTimestamp(), obj.getAction(), obj.getName(),
-                            obj.getRemoteIp(), obj.getRemoteAsn(), obj.getRemoteBgpId(),obj.getPeerRd(),
-                            "L3VPN" if obj.isL3Vpn() else "",
-                            "Pre-Policy" if obj.isPrePolicy() else "Post-Policy",
-                            obj.getBmpReasonCode(), obj.getBgpErrorCode(), obj.getBgpSubErrorCode(), obj.getErrorText())
+                            row['timestamp'], row['action'], row['name'],
+                            row['remote_ip'], row['remote_asn'], row['remote_bgp_id'], row['peer_rd'],
+                            "L3VPN" if row['isL3VPN'] else "",
+                            "Pre-Policy" if row['isPrePolicy'] else "Post-Policy",
+                            row['bmp_reason'], row['bgp_error_code'], row['bgp_error_sub_code'], row['error_text'])
 
-                    del PEER_LOGGERS[c_hash][obj.getHashId()]
+                    del PEER_LOGGERS[c_hash][row['hash']]
 
-                    if c_hash in BMP_STAT_LOGGERS and obj.getHashId() in BMP_STAT_LOGGERS[c_hash]:
-                        del BMP_STAT_LOGGERS[c_hash][obj.getHashId()]
+                    if c_hash in BMP_STAT_LOGGERS and row['hash'] in BMP_STAT_LOGGERS[c_hash]:
+                        del BMP_STAT_LOGGERS[c_hash][row['hash']]
 
-                    if c_hash in BASE_ATTR_LOGGERS and obj.getHashId() in BASE_ATTR_LOGGERS[c_hash]:
-                        del BASE_ATTR_LOGGERS[c_hash][obj.getHashId()]
+                    if c_hash in BASE_ATTR_LOGGERS and row['hash'] in BASE_ATTR_LOGGERS[c_hash]:
+                        del BASE_ATTR_LOGGERS[c_hash][row['hash']]
 
-                    if c_hash in UNICAST_PREFIX_LOGGERS and obj.getHashId() in UNICAST_PREFIX_LOGGERS[c_hash]:
-                        del UNICAST_PREFIX_LOGGERS[c_hash][obj.getHashId()]
+                    if c_hash in UNICAST_PREFIX_LOGGERS and row['hash'] in UNICAST_PREFIX_LOGGERS[c_hash]:
+                        del UNICAST_PREFIX_LOGGERS[c_hash][row['hash']]
 
-                    if c_hash in LS_NODE_LOGGERS and obj.getHashId() in LS_NODE_LOGGERS[c_hash]:
-                        del LS_NODE_LOGGERS[c_hash][obj.getHashId()]
+                    if c_hash in LS_NODE_LOGGERS and row['hash'] in LS_NODE_LOGGERS[c_hash]:
+                        del LS_NODE_LOGGERS[c_hash][row['hash']]
 
-                    if c_hash in LS_LINK_LOGGERS and obj.getHashId() in LS_LINK_LOGGERS[c_hash]:
-                        del LS_LINK_LOGGERS[c_hash][obj.getHashId()]
+                    if c_hash in LS_LINK_LOGGERS and row['hash'] in LS_LINK_LOGGERS[c_hash]:
+                        del LS_LINK_LOGGERS[c_hash][row['hash']]
 
-                    if c_hash in LS_PREFIX_LOGGERS and obj.getHashId() in LS_PREFIX_LOGGERS[c_hash]:
-                        del LS_PREFIX_LOGGERS[c_hash][obj.getHashId()]
+                    if c_hash in LS_PREFIX_LOGGERS and row['hash'] in LS_PREFIX_LOGGERS[c_hash]:
+                        del LS_PREFIX_LOGGERS[c_hash][row['hash']]
 
 
                 else:
-                    PEER_LOGGERS[c_hash][obj.getHashId()].info(
+                    PEER_LOGGERS[c_hash][row['hash']].info(
                             "%-27s Action: %-9s Name: %s\n"
                             "    Remote IP: %s AS: %u BGP Id: %s RD: %s %s %s",
-                            obj.getTimestamp(), obj.getAction(), obj.getName(),
-                            obj.getRemoteIp(), obj.getRemoteAsn(), obj.getRemoteBgpId(),obj.getPeerRd(),
-                            "L3VPN" if obj.isL3Vpn() else "",
-                            "Pre-Policy" if obj.isPrePolicy() else "Post-Policy")
+                            row['timestamp'], row['action'], row['name'],
+                            row['remote_ip'], row['remote_asn'], row['remote_bgp_id'], row['peer_rd'],
+                            "L3VPN" if row['isL3VPN'] else "",
+                            "Pre-Policy" if row['isPrePolicy'] else "Post-Policy")
 
             except NameError as e:
                 print e
@@ -638,42 +648,37 @@ def processMessage(msg, fdir):
     :return:
     """
     try:
-        (headers, data) = msg.value.split("\n\n", 1)
-
-        obj = None
-
-        hdr = parsed_headers()
-        hdr.parse(headers)
+        m = Message(msg.value)  # Gets body of kafka message.
 
         if msg.topic == 'openbmp.parsed.collector':
-            processCollectorMsg(hdr.getCollectorHashId(), data, fdir)
+            processCollectorMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.router':
-            processRouterMsg(hdr.getCollectorHashId(), data, fdir)
+            processRouterMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.peer':
-            processPeerMsg(hdr.getCollectorHashId(), data, fdir)
+            processPeerMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.bmp_stat':
-            processBmpStatMsg(hdr.getCollectorHashId(), data, fdir)
+            processBmpStatMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.base_attribute':
-            processBaseAttributeMsg(hdr.getCollectorHashId(), data, fdir)
+            processBaseAttributeMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.unicast_prefix':
-            processUnicastPrefixMsg(hdr.getCollectorHashId(), data, fdir)
+            processUnicastPrefixMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.ls_node':
-            processLsNodeMsg(hdr.getCollectorHashId(), data, fdir)
+            processLsNodeMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.ls_link':
-            processLsLinkMsg(hdr.getCollectorHashId(), data, fdir)
+            processLsLinkMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.ls_prefix':
-            processLsPrefixMsg(hdr.getCollectorHashId(), data, fdir)
+            processLsPrefixMsg(m, fdir)
 
         elif msg.topic == 'openbmp.bmp_raw':
-            processBmpRawMsg(hdr.getCollectorHashId(), hdr.getRouterHashId(), hdr.getRouterIp(), data, fdir)
+            processBmpRawMsg(m, fdir)
 
     except:
         print "ERROR processing message: "
