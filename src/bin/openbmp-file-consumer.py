@@ -28,6 +28,7 @@ from openbmp.api.parsed.message import Message
 from openbmp.api.parsed.message import Router
 from openbmp.api.parsed.message import Collector
 from openbmp.api.parsed.message import Peer
+from openbmp.api.parsed.message import BmpStat
 
 """
 from openbmp.parsed.headers import headers as parsed_headers
@@ -162,7 +163,7 @@ def processRouterMsg(msg, fdir):
     :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = Router()
+    obj = Router(msg)
 
     c_hash = msg.getCollector_hash_id()
     map_list = obj.getRowMap()
@@ -220,7 +221,7 @@ def processPeerMsg(msg, fdir):
     :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = Peer()
+    obj = Peer(msg)
 
     c_hash = msg.getCollector_hash_id()
     map_list = obj.getRowMap()
@@ -307,25 +308,26 @@ def processPeerMsg(msg, fdir):
                 print "row = [%d] (%r)" % (len(row), row)
 
 
-def processBmpStatMsg(c_hash, data, fdir):
+def processBmpStatMsg(msg, fdir):
     """ Process Bmp Stats message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = bmp_stat()
+
+    obj = BmpStat(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in BMP_STAT_LOGGERS or obj.getPeerHashId() not in BMP_STAT_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
-                                            'PEER_' + resolveIp(obj.getPeerIp()))
+                if c_hash not in BMP_STAT_LOGGERS or row['peer_hash'] not in BMP_STAT_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row['router_ip']),
+                                            'PEER_' + resolveIp(row['peer_ip']))
 
                     try:
                         os.makedirs(filepath)
@@ -335,17 +337,17 @@ def processBmpStatMsg(c_hash, data, fdir):
                     if c_hash not in BMP_STAT_LOGGERS:
                         BMP_STAT_LOGGERS[c_hash] = {}
 
-                    BMP_STAT_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.bmp_stat.' + obj.getPeerHashId(),
+                    BMP_STAT_LOGGERS[c_hash][row['peer_hash']] = initLogger('openbmp.parsed.bmp_stat.' + row['peer_hash'],
                                                                           os.path.join(filepath, 'bmp_stats.txt'))
 
-                BMP_STAT_LOGGERS[c_hash][obj.getPeerHashId()].info(
+                BMP_STAT_LOGGERS[c_hash][row['peer_hash']].info(
                                 "%-27s Pre-RIB: %-10lu Post-RIB: %-10lu Rejected: %-10u Update Dups: %-10u Withdraw Dups: %-10u\n"
                                 "    Invalid Cluster List: %-10u Invalid As Path: %-10u Invalid Originator Id: %-10u Invalid AS Confed: %-10u",
-                                obj.getTimestamp(),
-                                obj.getPrePolicyPrefixes(), obj.getPostPolicyPrefixes(), obj.getRejectedPrefixes(), obj.getKnownDupPrefixes(),
-                                obj.getKnownDupWithdrawPrefixes(), obj.getInvalidClusterListPrefixes(),
-                                obj.getInvalidAsPathPrefixes(), obj.getInvalidOriginatorIdPrefixes(),
-                                obj.getInvalidAsConffedPrefixes())
+                                row['timestamp'],
+                                row['pre_policy'], row['post_policy'], row['rejected'], row['known_dup_updates'],
+                                row['known_dup_withdraws'], row['invalid_cluster_list'],
+                                row['invalid_as_path'], row['invalid_originator'],
+                                row['invalid_as_confed'])
 
             except NameError as e:
                 print e
