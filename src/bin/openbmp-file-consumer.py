@@ -514,25 +514,25 @@ def processLsNodeMsg(msg, fdir):
                 print "ls_node: row = [%d] (%r)" % (len(row), row)
 
 
-def processLsLinkMsg(c_hash, data, fdir):
+def processLsLinkMsg(msg, fdir):
     """ Process LS Link message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = ls_link()
+    obj = LsLink(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in LS_LINK_LOGGERS or obj.getPeerHashId() not in LS_LINK_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
-                                            'PEER_' + resolveIp(obj.getPeerIp()))
+                if c_hash not in LS_LINK_LOGGERS or row['peer_hash'] not in LS_LINK_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row['router_ip']),
+                                            'PEER_' + resolveIp(row['peer_ip']))
 
                     try:
                         os.makedirs(filepath)
@@ -542,30 +542,30 @@ def processLsLinkMsg(c_hash, data, fdir):
                     if c_hash not in LS_LINK_LOGGERS:
                         LS_LINK_LOGGERS[c_hash] = {}
 
-                    LS_LINK_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.ls_link.' + obj.getPeerHashId(),
+                    LS_LINK_LOGGERS[c_hash][row['peer_hash']] = initLogger('openbmp.parsed.ls_link.' + row['peer_hash'],
                                                                           os.path.join(filepath, 'ls_links.txt'))
 
-                LS_LINK_LOGGERS[c_hash][obj.getPeerHashId()].info(
+                LS_LINK_LOGGERS[c_hash][row['peer_hash']].info(
                                 "%-27s RID: %-46s Hash Id: %-32s RoutingID: 0x%s \n"
                                 "    Proto: %-10s LsId: 0x%s MT Id: %s Area: %s Adm Grp: %u SRLG: %s Name: %s\n"
                                 "    Metric: %u Link Id (local/remote): %u/%u Interface IP (local/remote): %s/%s"
                                 "    Node Hash Id (local/remote): %s/%s\n"
                                 "    AS Path: %s LP: %u MED: %u NH: %s %s",
-                                obj.getTimestamp(), obj.getIgpRouterId() + '/' + obj.getRouterId(),
-                                obj.getHashId(), obj.getRoutingId(), obj.getProtocol(), obj.getLsId(),
-                                obj.getMtId(), obj.getOspfAreaId() if len(obj.getOspfAreaId()) else obj.getIsisAreaId(),
-                                obj.getAdminGroup(), obj.getSrlg(), obj.getLinkName(),
-                                obj.getIgpMetric(),obj.getLocalLinkId(), obj.getRemoteLinkId(), obj.getInterfaceIp(),
-                                obj.getNeighborIp(),obj.getLocalNodeHashId(), obj.getRemoteNodeHashId(),
-                                obj.getAsPath(), obj.getLocalPref(), obj.getMed(),obj.getNexthop(),
+                                row['timestamp'], row['igp_router_id'] + '/' + row['router_id'],
+                                row['hash'], row['routing_id'], row['protocol'], row['ls_id'],
+                                row['mt_id'], row['ospf_area_id'] if len(row['ospf_area_id']) else row['isis_area_id'],
+                                row['admin_group'], row['srlg'], row['link_name'],
+                                row['igp_metric'], row['local_link_id'], row['remote_link_id'], row['intf_ip'],
+                                row['nei_ip'], row['local_node_hash'], row['remote_node_hash'],
+                                row['as_path'], row['local_pref'], row['med'], row['nexthop'],
                                 "\n    MPLS Proto: %s Protection: %s TE Metric: %u Max Link BW: %f Max Resv BW: %f Unresv BW: %s" %
-                                    (obj.getMplsProtoMask(), obj.getLinkProtection(), obj.getTeDefaultMetric(),
-                                     obj.getMaxLinkBw(), obj.getMaxResvBw(), obj.getUnreservedBw()) if obj.getTeDefaultMetric() else "")
+                                    (row['mpls_proto_mask'], row['link_protection'], row['te_default_metric'],
+                                     row['max_link_bw'], row['max_resv_bw'], row['unresv_bw']) if row['te_default_metric'] else "")
 
             except NameError as e:
                 print "----"
                 print e
-                print data
+                print msg.getContent()
                 print "ls_link: row = [%d] (%r)" % (len(row), row)
 
 
