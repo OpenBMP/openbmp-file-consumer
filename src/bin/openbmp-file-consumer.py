@@ -31,6 +31,9 @@ from openbmp.api.parsed.message import Peer
 from openbmp.api.parsed.message import BmpStat
 from openbmp.api.parsed.message import BaseAttribute
 from openbmp.api.parsed.message import UnicastPrefix
+from openbmp.api.parsed.message import LsNode
+from openbmp.api.parsed.message import LsPrefix
+from openbmp.api.parsed.message import LsLink
 
 
 """
@@ -406,26 +409,26 @@ def processBaseAttributeMsg(msg, fdir):
                 print "row = [%d] (%r)" % (len(row), row)
 
 
-def processUnicastPrefixMsg(c_hash, data, fdir):
+def processUnicastPrefixMsg(msg, fdir):
     """ Process Unicast prefix message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
 
-    obj = unicast_prefix()
+    obj = UnicastPrefix(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in UNICAST_PREFIX_LOGGERS or obj.getPeerHashId() not in UNICAST_PREFIX_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
-                                            'PEER_' + resolveIp(obj.getPeerIp()))
+                if c_hash not in UNICAST_PREFIX_LOGGERS or row['peer_hash'] not in UNICAST_PREFIX_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row['router_ip']),
+                                            'PEER_' + resolveIp(row['peer_ip']))
 
                     try:
                         os.makedirs(filepath)
@@ -435,54 +438,54 @@ def processUnicastPrefixMsg(c_hash, data, fdir):
                     if c_hash not in UNICAST_PREFIX_LOGGERS:
                         UNICAST_PREFIX_LOGGERS[c_hash] = {}
 
-                    UNICAST_PREFIX_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.unicast_prefix.' + obj.getPeerHashId(),
+                    UNICAST_PREFIX_LOGGERS[c_hash][row['peer_hash']] = initLogger('openbmp.parsed.unicast_prefix.' + row['peer_hash'],
                                                                                 os.path.join(filepath, 'unicast_prefixes.txt'))
 
-                printAggLine = True if len(obj.getClusterList()) or len(obj.getAggregator()) or len(obj.getOriginatorId()) else False
+                printAggLine = True if len(row['cluster_list']) or len(row['aggregator']) or len(row['originator_id']) else False
 
-                UNICAST_PREFIX_LOGGERS[c_hash][obj.getPeerHashId()].info(
+                UNICAST_PREFIX_LOGGERS[c_hash][row['peer_hash']].info(
                                 "%-27s Prefix: %-40s Origin AS: %-10u\n"
                                 "           AS Count: %-6d NH: %-16s LP: %-3u MED: %-8u Origin: %s %s"
                                 "               Path: %s %s %s",
-                                obj.getTimestamp(), obj.getPrefix(),
-                                obj.getOriginAs(), obj.getAsPathCount(), obj.getNexthop(),
-                                obj.getLocalPref(), obj.getMed(), obj.getOrigin(),
+                                row['timestamp'], row['prefix'],
+                                row['origin_as'], row['as_path_count'], row['nexthop'],
+                                row['local_pref'], row['med'], row['origin'],
                                 "         Aggregator: %s %s ClusterList: %s Originator Id: %s\n" % (
-                                                obj.getAggregator(),
-                                                "[ Atomic ]" if obj.isAtomicAggregate()
+                                                row['aggregator'],
+                                                "[ Atomic ]" if row['isAtomicAgg']
                                                         else "",
-                                                obj.getClusterList(), obj.getOriginatorId()),
-                                obj.getAsPath(),
-                                "\n        Communities: " + obj.getCommunityList() + '\n' if len(obj.getCommunityList()) > 0 else "",
-                                "\n    Ext Communities: " + obj.getExtCommunityList() + '\n' if len(obj.getExtCommunityList()) > 0 else "")
+                                                row['cluster_list'], row['originator_id']),
+                                row['AS_PATH'],
+                                "\n        Communities: " + row['community_list'] + '\n' if len(row['community_list']) > 0 else "",
+                                "\n    Ext Communities: " + row['ext_community_list'] + '\n' if len(row['ext_community_list']) > 0 else "")
 
             except NameError as e:
 
                 print "++++++"
                 print e
-                print data
+                print msg.getContent()
                 print "row = [%d] (%r)" % (len(row), row)
 
 
-def processLsNodeMsg(c_hash, data, fdir):
+def processLsNodeMsg(msg, fdir):
     """ Process LS Node message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = ls_node()
+    obj = LsNode(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in LS_NODE_LOGGERS or obj.getPeerHashId() not in LS_NODE_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
-                                            'PEER_' + resolveIp(obj.getPeerIp()))
+                if c_hash not in LS_NODE_LOGGERS or row['peer_hash'] not in LS_NODE_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row['router_ip']),
+                                            'PEER_' + resolveIp(row['peer_ip']))
 
                     try:
                         os.makedirs(filepath)
@@ -492,22 +495,22 @@ def processLsNodeMsg(c_hash, data, fdir):
                     if c_hash not in LS_NODE_LOGGERS:
                         LS_NODE_LOGGERS[c_hash] = {}
 
-                    LS_NODE_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.ls_node.' + obj.getPeerHashId(),
+                    LS_NODE_LOGGERS[c_hash][row['peer_hash']] = initLogger('openbmp.parsed.ls_node.' + row['peer_hash'],
                                                                           os.path.join(filepath, 'ls_nodes.txt'))
 
-                LS_NODE_LOGGERS[c_hash][obj.getPeerHashId()].info(
+                LS_NODE_LOGGERS[c_hash][row['peer_hash']].info(
                                 "%-27s RID: %-46s Hash Id: %-32s RoutingID: 0x%s Name: %s\n"
                                 "    Proto: %-10s LsId: 0x%s MT Id: %-7u Area: %s Flags: %s\n"
                                 "    AS Path: %s LP: %u MED: %u NH: %s",
-                                obj.getTimestamp(), obj.getIgpRouterId() + '/' + obj.getRouterId(),
-                                obj.getHashId(), obj.getRoutingId(), obj.getName(), obj.getProtocol(), obj.getLsId(),
-                                obj.getMtId(), obj.getOspfAreaId() if len(obj.getOspfAreaId()) else obj.getIsisAreaId(),
-                                obj.getFlags(), obj.getAsPath(), obj.getLocalPref(), obj.getMed(), obj.getNexthop())
+                                row['timestamp'], row['igp_router_id'] + '/' + row['router_id'],
+                                row['hash'], row['routing_id'], row['name'], row['protocol'], row['ls_id'],
+                                row['mt_id'], row['ospf_area_id'] if len(row['ospf_area_id']) else row['isis_area_id'],
+                                row['flags'], row['as_path'], row['local_pref'], row['med'], row['nexthop'])
 
             except NameError as e:
                 print "----"
                 print e
-                print data
+                print msg.getContent()
                 print "ls_node: row = [%d] (%r)" % (len(row), row)
 
 
