@@ -569,25 +569,25 @@ def processLsLinkMsg(msg, fdir):
                 print "ls_link: row = [%d] (%r)" % (len(row), row)
 
 
-def processLsPrefixMsg(c_hash, data, fdir):
+def processLsPrefixMsg(msg, fdir):
     """ Process LS Prefix message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = ls_prefix()
+    obj = LsPrefix(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in LS_PREFIX_LOGGERS or obj.getPeerHashId() not in LS_PREFIX_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
-                                            'PEER_' + resolveIp(obj.getPeerIp()))
+                if c_hash not in LS_PREFIX_LOGGERS or row['peer_hash'] not in LS_PREFIX_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row['router_ip']),
+                                            'PEER_' + resolveIp(row['peer_ip']))
 
                     try:
                         os.makedirs(filepath)
@@ -597,26 +597,26 @@ def processLsPrefixMsg(c_hash, data, fdir):
                     if c_hash not in LS_PREFIX_LOGGERS:
                         LS_PREFIX_LOGGERS[c_hash] = {}
 
-                    LS_PREFIX_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.ls_prefix.' + obj.getPeerHashId(),
+                    LS_PREFIX_LOGGERS[c_hash][row['peer_hash']] = initLogger('openbmp.parsed.ls_prefix.' + row['peer_hash'],
                                                                           os.path.join(filepath, 'ls_prefixes.txt'))
 
-                LS_PREFIX_LOGGERS[c_hash][obj.getPeerHashId()].info(
+                LS_PREFIX_LOGGERS[c_hash][row['peer_hash']].info(
                                 "%-27s RID: %-46s Prefix: %-32s Hash Id: %-32s RoutingID: 0x%s \n"
                                 "    Proto: %-10s LsId: 0x%s MT Id: %s Area: %s %s %s\n"
                                 "    Metric: %u Flags: %s RTag: %u Ext RTag: 0x%s"
                                 "    Local Node Hash Id: %s AS Path: %s LP: %u MED: %u NH: %s",
-                                obj.getTimestamp(), obj.getIgpRouterId() + '/' + obj.getRouterId(),
-                                obj.getPrefix(), obj.getHashId(), obj.getRoutingId(), obj.getProtocol(), obj.getLsId(),
-                                obj.getMtId(), obj.getOspfAreaId() if len(obj.getOspfAreaId()) else obj.getIsisAreaId(),
-                                " Route Type: %s" % obj.getOspfRouteType() if len(obj.getOspfRouteType()) else "",
-                                " Fwd Addr: %s" % obj.getOspfFwdAddress() if len(obj.getOspfFwdAddress()) else "",
-                                obj.getIgpMetric(), obj.getIgpFlags(), obj.getRouteTag(), obj.getExtRouteTag(),
-                                obj.getLocalNodeHashId(), obj.getAsPath(), obj.getLocalPref(), obj.getMed(), obj.getNexthop())
+                                row['timestamp'], row['igp_router_id'] + '/' + row['router_id'],
+                                row['prefix'] + '/' + str(row['prefix_len']), row['hash'], row['routing_id'], row['protocol'], row['ls_id'],
+                                row['mt_id'], row['ospf_area_id'] if len(row['ospf_area_id']) else row['isis_area_id'],
+                                " Route Type: %s" % row['ospf_route_type'] if len(row['ospf_route_type']) else "",
+                                " Fwd Addr: %s" % row['ospf_fwd_addr'] if len(row['ospf_fwd_addr']) else "",
+                                row['igp_metric'], row['igp_flags'], row['route_tag'], row['ext_route_tag'],
+                                row['local_node_hash'], row['as_path'], row['local_pref'], row['med'], row['nexthop'])
 
             except NameError as e:
                 print "----"
                 print e
-                print data
+                print msg.getContent()
                 print "ls_prefix: row = [%d] (%r)" % (len(row), row)
 
 
