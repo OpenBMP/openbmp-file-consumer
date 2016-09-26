@@ -29,6 +29,9 @@ from openbmp.api.parsed.message import Router
 from openbmp.api.parsed.message import Collector
 from openbmp.api.parsed.message import Peer
 from openbmp.api.parsed.message import BmpStat
+from openbmp.api.parsed.message import BaseAttribute
+from openbmp.api.parsed.message import UnicastPrefix
+
 
 """
 from openbmp.parsed.headers import headers as parsed_headers
@@ -354,25 +357,25 @@ def processBmpStatMsg(msg, fdir):
                 print "row = [%d] (%r)" % (len(row), row)
 
 
-def processBaseAttributeMsg(c_hash, data, fdir):
+def processBaseAttributeMsg(msg, fdir):
     """ Process Base attribute message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = base_attribute()
+    obj = BaseAttribute(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in BASE_ATTR_LOGGERS or obj.getPeerHashId() not in BASE_ATTR_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
-                                            'PEER_' + resolveIp(obj.getPeerIp()))
+                if c_hash not in BASE_ATTR_LOGGERS or row['peer_hash'] not in BASE_ATTR_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row['router_ip']),
+                                            'PEER_' + resolveIp(row['peer_ip']))
 
                     try:
                         os.makedirs(filepath)
@@ -382,24 +385,24 @@ def processBaseAttributeMsg(c_hash, data, fdir):
                     if c_hash not in BASE_ATTR_LOGGERS:
                         BASE_ATTR_LOGGERS[c_hash] = {}
 
-                    BASE_ATTR_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.base_attribute.' + obj.getPeerHashId(),
+                    BASE_ATTR_LOGGERS[c_hash][row['peer_hash']] = initLogger('openbmp.parsed.base_attribute.' + row['peer_hash'],
                                                                                 os.path.join(filepath, 'base_attributes.txt'))
 
-                BASE_ATTR_LOGGERS[c_hash][obj.getPeerHashId()].info(
+                BASE_ATTR_LOGGERS[c_hash][row['peer_hash']].info(
                                 "%-27s Origin AS: %-10u AS Count: %-6d NH: %-16s LP: %-3u MED: %-8u Origin: %s\n"
                                 "    Aggregator: %-18s %s ClusterList: %-24s Originator Id: %s\n"
                                 "    Path: %s %s %s",
-                                obj.getTimestamp(), obj.getOriginAs(), obj.getAsPathCount(), obj.getNexthop(),
-                                obj.getLocalPref(), obj.getMed(), obj.getOrigin(), obj.getAggregator(),
-                                "[ Atomic ]" if obj.isAttomicAggregate() else "",
-                                obj.getClusterList(), obj.getOriginatorId(), obj.getAsPath(),
-                                obj.getCommunityList() + '\n' if len(obj.getClusterList()) > 0 else "",
-                                obj.getExtCommunityList() + '\n' if len(obj.getExtCommunityList()) > 0 else "")
+                                row['timestamp'], row['origin_as'], row['as_path_count'], row['nexthop'],
+                                row['local_pref'], row['med'], row['origin'], row['aggregator'],
+                                "[ Atomic ]" if row['isAtomicAgg'] else "",
+                                row['cluster_list'], row['originator_id'], row['as_path'],
+                                row['community_list'] + '\n' if len(row['cluster_list']) > 0 else "",
+                                row['ext_community_list'] + '\n' if len(row['ext_community_list']) > 0 else "")
 
             except NameError as e:
                 print "---------"
                 print e
-                print data
+                print msg.getContent()
                 print "row = [%d] (%r)" % (len(row), row)
 
 
@@ -410,6 +413,7 @@ def processUnicastPrefixMsg(c_hash, data, fdir):
     :param data:        Message data to be consumed (should not contain headers)
     :param fdir:        Directory where to store the parsed files
     """
+
     obj = unicast_prefix()
 
     # Log messages
