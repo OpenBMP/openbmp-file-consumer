@@ -36,21 +36,6 @@ from openbmp.api.parsed.message import LsPrefix
 from openbmp.api.parsed.message import LsLink
 
 
-"""
-from openbmp.parsed.headers import headers as parsed_headers
-from openbmp.parsed.collector import collector
-from openbmp.parsed.router import router
-from openbmp.parsed.peer import peer
-from openbmp.parsed.base_attribute import base_attribute
-from openbmp.parsed.unicast_prefix import unicast_prefix
-from openbmp.parsed.bmp_stat import bmp_stat
-from openbmp.parsed.ls_node import ls_node
-from openbmp.parsed.ls_link import ls_link
-from openbmp.parsed.ls_prefix import ls_prefix
-"""
-
-
-
 # Collector logger hash to keep track of file loggers for collector object/messages
 #     Key = <collector hash>
 #     Value = Logger
@@ -620,15 +605,17 @@ def processLsPrefixMsg(msg, fdir):
                 print "ls_prefix: row = [%d] (%r)" % (len(row), row)
 
 
-def processBmpRawMsg(c_hash, r_hash, r_ip, data, fdir):
+def processBmpRawMsg(msg, fdir):
     """ Process BMP RAW message
 
-    :param c_hash:      Collector Hash ID
-    :param r_hash:      Router Hash ID
-    :param r_ip:        Router IP address
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
+
+    c_hash = msg.getCollector_hash_id()
+    r_hash = msg.getRouter_hash_id()
+    r_ip = msg.getRouterIp()
+
     # Create logger
     if c_hash not in BMP_RAW_LOGGERS or r_hash not in BMP_RAW_LOGGERS[c_hash]:
         filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(r_ip))
@@ -645,7 +632,7 @@ def processBmpRawMsg(c_hash, r_hash, r_ip, data, fdir):
                                                           os.path.join(filepath, "bmp_feed.raw"))
 
     if BMP_RAW_LOGGERS[c_hash][r_hash]:
-        BMP_RAW_LOGGERS[c_hash][r_hash].info(data)
+        BMP_RAW_LOGGERS[c_hash][r_hash].info(msg.getContent())
 
 
 def processMessage(msg, fdir):

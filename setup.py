@@ -10,6 +10,6 @@ setup(name='openbmp-file-consumer',
       url='',
       data_files=[('etc', ['src/etc/openbmp-file-consumer.yml'])],
       package_dir={'': 'src/site-packages'},
-      packages=['openbmp', 'openbmp.parsed'],
+      packages=['openbmp'],
       scripts=['src/bin/openbmp-file-consumer']
      )
