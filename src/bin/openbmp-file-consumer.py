@@ -522,9 +522,9 @@ def processLsLinkMsg(msg, fdir):
         if len(row):
             try:
                 # Create logger
-                if c_hash not in LS_LINK_LOGGERS or row['peer_hash'] not in LS_LINK_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row['router_ip']),
-                                            'PEER_' + resolveIp(row['peer_ip']))
+                if c_hash not in LS_LINK_LOGGERS or row[MsgBusFields.PEER_HASH.getName()] not in LS_LINK_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row[MsgBusFields.ROUTER_IP.getName()]),
+                                            'PEER_' + resolveIp(row[MsgBusFields.PEER_IP.getName()]))
 
                     try:
                         os.makedirs(filepath)
@@ -534,25 +534,25 @@ def processLsLinkMsg(msg, fdir):
                     if c_hash not in LS_LINK_LOGGERS:
                         LS_LINK_LOGGERS[c_hash] = {}
 
-                    LS_LINK_LOGGERS[c_hash][row['peer_hash']] = initLogger('openbmp.parsed.ls_link.' + row['peer_hash'],
+                    LS_LINK_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]] = initLogger('openbmp.parsed.ls_link.' + row[MsgBusFields.PEER_HASH.getName()],
                                                                            os.path.join(filepath, 'ls_links.txt'))
 
-                LS_LINK_LOGGERS[c_hash][row['peer_hash']].info(
+                LS_LINK_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]].info(
                     "%-27s RID: %-46s Hash Id: %-32s RoutingID: 0x%s \n"
                     "    Proto: %-10s LsId: 0x%s MT Id: %s Area: %s Adm Grp: %u SRLG: %s Name: %s\n"
                     "    Metric: %u Link Id (local/remote): %u/%u Interface IP (local/remote): %s/%s"
                     "    Node Hash Id (local/remote): %s/%s\n"
                     "    AS Path: %s LP: %u MED: %u NH: %s %s",
-                    row['timestamp'], row['igp_router_id'] + '/' + row['router_id'],
-                    row['hash'], row['routing_id'], row['protocol'], row['ls_id'],
-                    row['mt_id'], row['ospf_area_id'] if len(row['ospf_area_id']) else row['isis_area_id'],
-                    row['admin_group'], row['srlg'], row['link_name'],
-                    row['igp_metric'], row['local_link_id'], row['remote_link_id'], row['intf_ip'],
-                    row['nei_ip'], row['local_node_hash'], row['remote_node_hash'],
-                    row['as_path'], row['local_pref'], row['med'], row['nexthop'],
+                    row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.IGP_ROUTER_ID.getName()] + '/' + row[MsgBusFields.ROUTER_ID.getName()],
+                    row[MsgBusFields.HASH.getName()], row[MsgBusFields.ROUTING_ID.getName()], row[MsgBusFields.PROTOCOL.getName()], row[MsgBusFields.LS_ID.getName()],
+                    row[MsgBusFields.MT_ID.getName()], row[MsgBusFields.OSPF_AREA_ID.getName()] if len(row[MsgBusFields.OSPF_AREA_ID.getName()]) else row[MsgBusFields.ISIS_AREA_ID.getName()],
+                    row[MsgBusFields.ADMIN_GROUP.getName()], row[MsgBusFields.SRLG.getName()], row[MsgBusFields.LINK_NAME.getName()],
+                    row[MsgBusFields.IGP_METRIC.getName()], row[MsgBusFields.LOCAL_LINK_ID.getName()], row[MsgBusFields.REMOTE_LINK_ID.getName()], row[MsgBusFields.INTF_IP.getName()],
+                    row[MsgBusFields.NEI_IP.getName()], row[MsgBusFields.LOCAL_NODE_HASH.getName()], row[MsgBusFields.REMOTE_NODE_HASH.getName()],
+                    row[MsgBusFields.AS_PATH.getName()], row[MsgBusFields.LOCAL_PREF.getName()], row[MsgBusFields.MED.getName()], row[MsgBusFields.NEXTHOP.getName()],
                     "\n    MPLS Proto: %s Protection: %s TE Metric: %u Max Link BW: %f Max Resv BW: %f Unresv BW: %s" %
-                    (row['mpls_proto_mask'], row['link_protection'], row['te_default_metric'],
-                     row['max_link_bw'], row['max_resv_bw'], row['unresv_bw']) if row['te_default_metric'] else "")
+                    (row[MsgBusFields.MPLS_PROTO_MASK.getName()], row[MsgBusFields.LINK_PROTECTION.getName()], row[MsgBusFields.TE_DEFAULT_METRIC.getName()],
+                     row[MsgBusFields.MAX_LINK_BW.getName()], row[MsgBusFields.MAX_RESV_BW.getName()], row[MsgBusFields.UNRESV_BW.getName()]) if row[MsgBusFields.TE_DEFAULT_METRIC.getName()] else "")
 
             except NameError as e:
                 print "----"
