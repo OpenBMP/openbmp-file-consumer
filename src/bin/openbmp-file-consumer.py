@@ -224,9 +224,9 @@ def processPeerMsg(msg, fdir):
         if len(row):
             try:
                 # Create logger
-                if c_hash not in PEER_LOGGERS or row['hash'] not in PEER_LOGGERS[c_hash]:
+                if c_hash not in PEER_LOGGERS or row[MsgBusFields.HASH.getName()] not in PEER_LOGGERS[c_hash]:
                     filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash,
-                                            'ROUTER_' + resolveIp(row['hash']))
+                                            'ROUTER_' + resolveIp(row[MsgBusFields.ROUTER_IP.getName()]))
 
                     try:
                         os.makedirs(filepath)
@@ -236,65 +236,65 @@ def processPeerMsg(msg, fdir):
                     if c_hash not in PEER_LOGGERS:
                         PEER_LOGGERS[c_hash] = {}
 
-                    PEER_LOGGERS[c_hash][row['hash']] = initLogger('openbmp.parsed.peer.' + row['hash'],
+                    PEER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]] = initLogger('openbmp.parsed.peer.' + row[MsgBusFields.HASH.getName()],
                                                                    os.path.join(filepath, 'peers.txt'))
 
-                if row['action'] == "up":
-                    PEER_LOGGERS[c_hash][row['hash']].info(
+                if row[MsgBusFields.ACTION.getName()] == "up":
+                    PEER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]].info(
                         "%-27s Action: %-9s Name: %s [%s]\n"
                         "    Remote IP: %s:%d AS: %u BGP Id: %s HD: %u RD: %s %s %s\n"
                         "          Cap: %r\n"
                         "    Local  IP: %s:%d AS: %u BGP Id: %s HD: %u\n"
                         "          Cap: %r",
-                        row['timestamp'], row['action'], row['name'], row['info_data'],
-                        row['remote_ip'], row['remote_port'], row['remote_asn'], row['remote_bgp_id'],
-                        row['remote_holddown'], row['peer_rd'],
-                        "L3VPN" if row['isL3VPN'] else "",
-                        "Pre-Policy" if row['isPrePolicy'] else "Post-Policy",
-                        row['recv_cap'], row['local_ip'], row['local_port'],
-                        row['local_asn'], row['local_bgp_id'], row['adv_holddown'],
-                        row['adv_cap'])
+                        row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.ACTION.getName()], row[MsgBusFields.NAME.getName()], row[MsgBusFields.INFO_DATA.getName()],
+                        row[MsgBusFields.REMOTE_IP.getName()], row[MsgBusFields.REMOTE_PORT.getName()], row[MsgBusFields.REMOTE_ASN.getName()], row[MsgBusFields.REMOTE_BGP_ID.getName()],
+                        row[MsgBusFields.REMOTE_HOLDDOWN.getName()], row[MsgBusFields.PEER_RD.getName()],
+                        "L3VPN" if row[MsgBusFields.IS_L3VPN.getName()] else "",
+                        "Pre-Policy" if row[MsgBusFields.ISPREPOLICY.getName()] else "Post-Policy",
+                        row[MsgBusFields.RECV_CAP.getName()], row[MsgBusFields.LOCAL_IP.getName()], row[MsgBusFields.LOCAL_PORT.getName()],
+                        row[MsgBusFields.LOCAL_ASN.getName()], row[MsgBusFields.LOCAL_BGP_ID.getName()], row[MsgBusFields.ADV_HOLDDOWN.getName()],
+                        row[MsgBusFields.ADV_CAP.getName()])
 
-                elif row['action'] == "down":
-                    PEER_LOGGERS[c_hash][row['hash']].info(
+                elif row[MsgBusFields.ACTION.getName()] == "down":
+                    PEER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]].info(
                         "%-27s Action: %-9s Name: %s\n"
                         "    Remote IP: %s AS: %u BGP Id: %s RD: %s %s %s\n"
                         "    Term Info: %d bgp: %d/%d %s",
-                        row['timestamp'], row['action'], row['name'],
-                        row['remote_ip'], row['remote_asn'], row['remote_bgp_id'], row['peer_rd'],
-                        "L3VPN" if row['isL3VPN'] else "",
-                        "Pre-Policy" if row['isPrePolicy'] else "Post-Policy",
-                        row['bmp_reason'], row['bgp_error_code'], row['bgp_error_sub_code'], row['error_text'])
+                        row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.ACTION.getName()], row[MsgBusFields.NAME.getName()],
+                        row[MsgBusFields.REMOTE_IP.getName()], row[MsgBusFields.REMOTE_ASN.getName()], row[MsgBusFields.REMOTE_BGP_ID.getName()], row[MsgBusFields.PEER_RD.getName()],
+                        "L3VPN" if row[MsgBusFields.IS_L3VPN.getName()] else "",
+                        "Pre-Policy" if row[MsgBusFields.ISPREPOLICY.getName()] else "Post-Policy",
+                        row[MsgBusFields.BMP_REASON.getName()], row[MsgBusFields.BGP_ERROR_CODE.getName()], row[MsgBusFields.BGP_ERROR_SUB_CODE.getName()], row[MsgBusFields.ERROR_TEXT.getName()])
 
-                    del PEER_LOGGERS[c_hash][row['hash']]
+                    del PEER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
-                    if c_hash in BMP_STAT_LOGGERS and row['hash'] in BMP_STAT_LOGGERS[c_hash]:
-                        del BMP_STAT_LOGGERS[c_hash][row['hash']]
+                    if c_hash in BMP_STAT_LOGGERS and row[MsgBusFields.HASH.getName()] in BMP_STAT_LOGGERS[c_hash]:
+                        del BMP_STAT_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
-                    if c_hash in BASE_ATTR_LOGGERS and row['hash'] in BASE_ATTR_LOGGERS[c_hash]:
-                        del BASE_ATTR_LOGGERS[c_hash][row['hash']]
+                    if c_hash in BASE_ATTR_LOGGERS and row[MsgBusFields.HASH.getName()] in BASE_ATTR_LOGGERS[c_hash]:
+                        del BASE_ATTR_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
-                    if c_hash in UNICAST_PREFIX_LOGGERS and row['hash'] in UNICAST_PREFIX_LOGGERS[c_hash]:
-                        del UNICAST_PREFIX_LOGGERS[c_hash][row['hash']]
+                    if c_hash in UNICAST_PREFIX_LOGGERS and row[MsgBusFields.HASH.getName()] in UNICAST_PREFIX_LOGGERS[c_hash]:
+                        del UNICAST_PREFIX_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
-                    if c_hash in LS_NODE_LOGGERS and row['hash'] in LS_NODE_LOGGERS[c_hash]:
-                        del LS_NODE_LOGGERS[c_hash][row['hash']]
+                    if c_hash in LS_NODE_LOGGERS and row[MsgBusFields.HASH.getName()] in LS_NODE_LOGGERS[c_hash]:
+                        del LS_NODE_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
-                    if c_hash in LS_LINK_LOGGERS and row['hash'] in LS_LINK_LOGGERS[c_hash]:
-                        del LS_LINK_LOGGERS[c_hash][row['hash']]
+                    if c_hash in LS_LINK_LOGGERS and row[MsgBusFields.HASH.getName()] in LS_LINK_LOGGERS[c_hash]:
+                        del LS_LINK_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
-                    if c_hash in LS_PREFIX_LOGGERS and row['hash'] in LS_PREFIX_LOGGERS[c_hash]:
-                        del LS_PREFIX_LOGGERS[c_hash][row['hash']]
+                    if c_hash in LS_PREFIX_LOGGERS and row[MsgBusFields.HASH.getName()] in LS_PREFIX_LOGGERS[c_hash]:
+                        del LS_PREFIX_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
 
                 else:
-                    PEER_LOGGERS[c_hash][row['hash']].info(
+                    PEER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]].info(
                         "%-27s Action: %-9s Name: %s\n"
                         "    Remote IP: %s AS: %u BGP Id: %s RD: %s %s %s",
-                        row['timestamp'], row['action'], row['name'],
-                        row['remote_ip'], row['remote_asn'], row['remote_bgp_id'], row['peer_rd'],
-                        "L3VPN" if row['isL3VPN'] else "",
-                        "Pre-Policy" if row['isPrePolicy'] else "Post-Policy")
+                        row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.ACTION.getName()], row[MsgBusFields.NAME.getName()],
+                        row[MsgBusFields.REMOTE_IP.getName()], row[MsgBusFields.REMOTE_ASN.getName()], row[MsgBusFields.REMOTE_BGP_ID.getName()], row[MsgBusFields.PEER_RD.getName()],
+                        "L3VPN" if row[MsgBusFields.IS_L3VPN.getName()] else "",
+                        "Pre-Policy" if row[MsgBusFields.ISPREPOLICY.getName()] else "Post-Policy")
 
             except NameError as e:
                 print e
