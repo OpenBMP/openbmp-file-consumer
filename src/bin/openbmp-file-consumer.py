@@ -415,9 +415,9 @@ def processUnicastPrefixMsg(msg, fdir):
         if len(row):
             try:
                 # Create logger
-                if c_hash not in UNICAST_PREFIX_LOGGERS or row['peer_hash'] not in UNICAST_PREFIX_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row['router_ip']),
-                                            'PEER_' + resolveIp(row['peer_ip']))
+                if c_hash not in UNICAST_PREFIX_LOGGERS or row[MsgBusFields.PEER_HASH.getName()] not in UNICAST_PREFIX_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row[MsgBusFields.ROUTER_IP.getName()]),
+                                            'PEER_' + resolveIp(row[MsgBusFields.PEER_IP.getName()]))
 
                     try:
                         os.makedirs(filepath)
@@ -427,29 +427,29 @@ def processUnicastPrefixMsg(msg, fdir):
                     if c_hash not in UNICAST_PREFIX_LOGGERS:
                         UNICAST_PREFIX_LOGGERS[c_hash] = {}
 
-                    UNICAST_PREFIX_LOGGERS[c_hash][row['peer_hash']] = initLogger(
-                        'openbmp.parsed.unicast_prefix.' + row['peer_hash'],
+                    UNICAST_PREFIX_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]] = initLogger(
+                        'openbmp.parsed.unicast_prefix.' + row[MsgBusFields.PEER_HASH.getName()],
                         os.path.join(filepath, 'unicast_prefixes.txt'))
 
-                printAggLine = True if len(row['cluster_list']) or len(row['aggregator']) or len(
-                    row['originator_id']) else False
+                printAggLine = True if len(row[MsgBusFields.CLUSTER_LIST.getName()]) or len(row[MsgBusFields.AGGREGATOR.getName()]) or len(
+                    row[MsgBusFields.ORIGINATOR_ID.getName()]) else False
 
-                UNICAST_PREFIX_LOGGERS[c_hash][row['peer_hash']].info(
+                UNICAST_PREFIX_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]].info(
                     "%-27s Prefix: %-40s Origin AS: %-10u\n"
                     "           AS Count: %-6d NH: %-16s LP: %-3u MED: %-8u Origin: %s %s"
                     "               Path: %s %s %s",
-                    row['timestamp'], row['prefix'],
-                    row['origin_as'], row['as_path_count'], row['nexthop'],
-                    row['local_pref'], row['med'], row['origin'],
+                    row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.PREFIX.getName()],
+                    row[MsgBusFields.ORIGIN_AS.getName()], row[MsgBusFields.AS_PATH_COUNT.getName()], row[MsgBusFields.NEXTHOP.getName()],
+                    row[MsgBusFields.LOCAL_PREF.getName()], row[MsgBusFields.MED.getName()], row[MsgBusFields.ORIGIN.getName()],
                     "         Aggregator: %s %s ClusterList: %s Originator Id: %s\n" % (
-                        row['aggregator'],
-                        "[ Atomic ]" if row['isAtomicAgg']
+                        row[MsgBusFields.AGGREGATOR.getName()],
+                        "[ Atomic ]" if row[MsgBusFields.ISATOMICAGG.getName()]
                         else "",
-                        row['cluster_list'], row['originator_id']),
-                    row['AS_PATH'],
-                    "\n        Communities: " + row['community_list'] + '\n' if len(row['community_list']) > 0 else "",
-                    "\n    Ext Communities: " + row['ext_community_list'] + '\n' if len(
-                        row['ext_community_list']) > 0 else "")
+                        row[MsgBusFields.CLUSTER_LIST.getName()], row[MsgBusFields.ORIGINATOR_ID.getName()]),
+                    row[MsgBusFields.AS_PATH.getName()],
+                    "\n        Communities: " + row[MsgBusFields.COMMUNITY_LIST.getName()] + '\n' if len(row[MsgBusFields.COMMUNITY_LIST.getName()]) > 0 else "",
+                    "\n    Ext Communities: " + row[MsgBusFields.EXT_COMMUNITY_LIST.getName()] + '\n' if len(
+                        row[MsgBusFields.EXT_COMMUNITY_LIST.getName()]) > 0 else "")
 
             except NameError as e:
 
