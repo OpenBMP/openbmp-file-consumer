@@ -364,9 +364,9 @@ def processBaseAttributeMsg(msg, fdir):
         if len(row):
             try:
                 # Create logger
-                if c_hash not in BASE_ATTR_LOGGERS or row['peer_hash'] not in BASE_ATTR_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row['router_ip']),
-                                            'PEER_' + resolveIp(row['peer_ip']))
+                if c_hash not in BASE_ATTR_LOGGERS or row[MsgBusFields.PEER_HASH.getName()] not in BASE_ATTR_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row[MsgBusFields.ROUTER_IP.getName()]),
+                                            'PEER_' + resolveIp(row[MsgBusFields.PEER_IP.getName()]))
 
                     try:
                         os.makedirs(filepath)
@@ -376,20 +376,20 @@ def processBaseAttributeMsg(msg, fdir):
                     if c_hash not in BASE_ATTR_LOGGERS:
                         BASE_ATTR_LOGGERS[c_hash] = {}
 
-                    BASE_ATTR_LOGGERS[c_hash][row['peer_hash']] = initLogger(
-                        'openbmp.parsed.base_attribute.' + row['peer_hash'],
+                    BASE_ATTR_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]] = initLogger(
+                        'openbmp.parsed.base_attribute.' + row[MsgBusFields.PEER_HASH.getName()],
                         os.path.join(filepath, 'base_attributes.txt'))
 
-                BASE_ATTR_LOGGERS[c_hash][row['peer_hash']].info(
+                BASE_ATTR_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]].info(
                     "%-27s Origin AS: %-10u AS Count: %-6d NH: %-16s LP: %-3u MED: %-8u Origin: %s\n"
                     "    Aggregator: %-18s %s ClusterList: %-24s Originator Id: %s\n"
                     "    Path: %s %s %s",
-                    row['timestamp'], row['origin_as'], row['as_path_count'], row['nexthop'],
-                    row['local_pref'], row['med'], row['origin'], row['aggregator'],
-                    "[ Atomic ]" if row['isAtomicAgg'] else "",
-                    row['cluster_list'], row['originator_id'], row['as_path'],
-                    row['community_list'] + '\n' if len(row['cluster_list']) > 0 else "",
-                    row['ext_community_list'] + '\n' if len(row['ext_community_list']) > 0 else "")
+                    row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.ORIGIN_AS.getName()], row[MsgBusFields.AS_PATH_COUNT.getName()], row[MsgBusFields.NEXTHOP.getName()],
+                    row[MsgBusFields.LOCAL_PREF.getName()], row[MsgBusFields.MED.getName()], row[MsgBusFields.ORIGIN.getName()], row[MsgBusFields.AGGREGATOR.getName()],
+                    "[ Atomic ]" if row[MsgBusFields.ISATOMICAGG.getName()] else "",
+                    row[MsgBusFields.CLUSTER_LIST.getName()], row[MsgBusFields.ORIGINATOR_ID.getName()], row[MsgBusFields.AS_PATH.getName()],
+                    row[MsgBusFields.COMMUNITY_LIST.getName()] + '\n' if len(row[MsgBusFields.CLUSTER_LIST.getName()]) > 0 else "",
+                    row[MsgBusFields.EXT_COMMUNITY_LIST.getName()] + '\n' if len(row[MsgBusFields.EXT_COMMUNITY_LIST.getName()]) > 0 else "")
 
             except NameError as e:
                 print "---------"
