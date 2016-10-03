@@ -166,7 +166,7 @@ def processRouterMsg(msg, fdir):
         if len(row):
             try:
                 # Create logger
-                if c_hash not in ROUTER_LOGGERS or row['hash'] not in ROUTER_LOGGERS[c_hash]:
+                if c_hash not in ROUTER_LOGGERS or row[MsgBusFields.HASH.getName()] not in ROUTER_LOGGERS[c_hash]:
                     filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash)
 
                     try:
@@ -177,28 +177,28 @@ def processRouterMsg(msg, fdir):
                     if c_hash not in ROUTER_LOGGERS:
                         ROUTER_LOGGERS[c_hash] = {}
 
-                    ROUTER_LOGGERS[c_hash][row['hash']] = initLogger('openbmp.parsed.router.' + row['hash'],
+                    ROUTER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]] = initLogger('openbmp.parsed.router.' + row[MsgBusFields.HASH.getName()],
                                                                      os.path.join(filepath, 'routers.txt'))
 
-                if row['action'] == "init":
-                    ROUTER_LOGGERS[c_hash][row['hash']].info(
+                if row[MsgBusFields.ACTION.getName()] == "init":
+                    ROUTER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]].info(
                         "%-27s Action: %-9s IP: %-16s Name: %s\n"
                         "    Description: %s [%s]",
-                        row['timestamp'], row['action'], row['ip_address'], row['name'],
-                        row['description'], row['init_data'])
+                        row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.ACTION.getName()], row[MsgBusFields.IP_ADDRESS.getName()], row[MsgBusFields.NAME.getName()],
+                        row[MsgBusFields.DESCRIPTION.getName()], row[MsgBusFields.INIT_DATA.getName()])
 
-                elif row['action'] == "term":
-                    ROUTER_LOGGERS[c_hash][row['hash']].info(
+                elif row[MsgBusFields.ACTION.getName()] == "term":
+                    ROUTER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]].info(
                         "%-27s Action: %-9s IP: %-16s Name: %s\n"
                         "    Term Reason: [%d] %s [%s]",
-                        row['timestamp'], row['action'], row['ip_address'], row['name'],
-                        row['term_code'], row['term_reason'], row['term_data'])
-                    del ROUTER_LOGGERS[c_hash][row['hash']]
+                        row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.ACTION.getName()], row[MsgBusFields.IP_ADDRESS.getName()], row[MsgBusFields.NAME.getName()],
+                        row[MsgBusFields.TERM_CODE.getName()], row[MsgBusFields.TERM_REASON.getName()], row[MsgBusFields.TERM_DATA.getName()])
+                    del ROUTER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
                 else:
-                    ROUTER_LOGGERS[c_hash][row['hash']].info(
+                    ROUTER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]].info(
                         "%-27s Action: %-9s IP: %-16s Name: %s",
-                        row['timestamp'], row['action'], row['ip_address'], row['name'])
+                        row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.ACTION.getName()], row[MsgBusFields.IP_ADDRESS.getName()], row[MsgBusFields.NAME.getName()])
 
             except NameError as e:
                 print e
