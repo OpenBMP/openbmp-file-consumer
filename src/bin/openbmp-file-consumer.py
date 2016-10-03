@@ -475,9 +475,9 @@ def processLsNodeMsg(msg, fdir):
         if len(row):
             try:
                 # Create logger
-                if c_hash not in LS_NODE_LOGGERS or row['peer_hash'] not in LS_NODE_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row['router_ip']),
-                                            'PEER_' + resolveIp(row['peer_ip']))
+                if c_hash not in LS_NODE_LOGGERS or row[MsgBusFields.PEER_HASH.getName()] not in LS_NODE_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row[MsgBusFields.ROUTER_IP.getName()]),
+                                            'PEER_' + resolveIp(row[MsgBusFields.PEER_IP.getName()]))
 
                     try:
                         os.makedirs(filepath)
@@ -487,17 +487,17 @@ def processLsNodeMsg(msg, fdir):
                     if c_hash not in LS_NODE_LOGGERS:
                         LS_NODE_LOGGERS[c_hash] = {}
 
-                    LS_NODE_LOGGERS[c_hash][row['peer_hash']] = initLogger('openbmp.parsed.ls_node.' + row['peer_hash'],
+                    LS_NODE_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]] = initLogger('openbmp.parsed.ls_node.' + row[MsgBusFields.PEER_HASH.getName()],
                                                                            os.path.join(filepath, 'ls_nodes.txt'))
 
-                LS_NODE_LOGGERS[c_hash][row['peer_hash']].info(
+                LS_NODE_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]].info(
                     "%-27s RID: %-46s Hash Id: %-32s RoutingID: 0x%s Name: %s\n"
                     "    Proto: %-10s LsId: 0x%s MT Id: %-7u Area: %s Flags: %s\n"
                     "    AS Path: %s LP: %u MED: %u NH: %s",
-                    row['timestamp'], row['igp_router_id'] + '/' + row['router_id'],
-                    row['hash'], row['routing_id'], row['name'], row['protocol'], row['ls_id'],
-                    row['mt_id'], row['ospf_area_id'] if len(row['ospf_area_id']) else row['isis_area_id'],
-                    row['flags'], row['as_path'], row['local_pref'], row['med'], row['nexthop'])
+                    row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.IGP_ROUTER_ID.getName()] + '/' + row[MsgBusFields.ROUTER_ID.getName()],
+                    row[MsgBusFields.HASH.getName()], row[MsgBusFields.ROUTING_ID.getName()], row[MsgBusFields.NAME.getName()], row[MsgBusFields.PROTOCOL.getName()], row[MsgBusFields.LS_ID.getName()],
+                    row[MsgBusFields.MT_ID.getName()], row[MsgBusFields.OSPF_AREA_ID.getName()] if len(row[MsgBusFields.OSPF_AREA_ID.getName()]) else row[MsgBusFields.ISIS_AREA_ID.getName()],
+                    row[MsgBusFields.FLAGS.getName()], row[MsgBusFields.AS_PATH.getName()], row[MsgBusFields.LOCAL_PREF.getName()], row[MsgBusFields.MED.getName()], row[MsgBusFields.NEXTHOP.getName()])
 
             except NameError as e:
                 print "----"
