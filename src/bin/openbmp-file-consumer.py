@@ -318,9 +318,9 @@ def processBmpStatMsg(msg, fdir):
         if len(row):
             try:
                 # Create logger
-                if c_hash not in BMP_STAT_LOGGERS or row['peer_hash'] not in BMP_STAT_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row['router_ip']),
-                                            'PEER_' + resolveIp(row['peer_ip']))
+                if c_hash not in BMP_STAT_LOGGERS or row[MsgBusFields.PEER_HASH.getName()] not in BMP_STAT_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row[MsgBusFields.ROUTER_IP.getName()]),
+                                            'PEER_' + resolveIp(row[MsgBusFields.PEER_IP.getName()]))
 
                     try:
                         os.makedirs(filepath)
@@ -330,18 +330,18 @@ def processBmpStatMsg(msg, fdir):
                     if c_hash not in BMP_STAT_LOGGERS:
                         BMP_STAT_LOGGERS[c_hash] = {}
 
-                    BMP_STAT_LOGGERS[c_hash][row['peer_hash']] = initLogger(
-                        'openbmp.parsed.bmp_stat.' + row['peer_hash'],
+                    BMP_STAT_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]] = initLogger(
+                        'openbmp.parsed.bmp_stat.' + row[MsgBusFields.PEER_HASH.getName()],
                         os.path.join(filepath, 'bmp_stats.txt'))
 
-                BMP_STAT_LOGGERS[c_hash][row['peer_hash']].info(
+                BMP_STAT_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]].info(
                     "%-27s Pre-RIB: %-10lu Post-RIB: %-10lu Rejected: %-10u Update Dups: %-10u Withdraw Dups: %-10u\n"
                     "    Invalid Cluster List: %-10u Invalid As Path: %-10u Invalid Originator Id: %-10u Invalid AS Confed: %-10u",
-                    row['timestamp'],
-                    row['pre_policy'], row['post_policy'], row['rejected'], row['known_dup_updates'],
-                    row['known_dup_withdraws'], row['invalid_cluster_list'],
-                    row['invalid_as_path'], row['invalid_originator'],
-                    row['invalid_as_confed'])
+                    row[MsgBusFields.TIMESTAMP.getName()],
+                    row[MsgBusFields.PRE_POLICY.getName()], row[MsgBusFields.POST_POLICY.getName()], row[MsgBusFields.REJECTED.getName()], row[MsgBusFields.KNOWN_DUP_UPDATES.getName()],
+                    row[MsgBusFields.KNOWN_DUP_WITHDRAWS.getName()], row[MsgBusFields.INVALID_CLUSTER_LIST.getName()],
+                    row[MsgBusFields.INVALID_AS_PATH.getName()], row[MsgBusFields.INVALID_ORIGINATOR.getName()],
+                    row[MsgBusFields.INVALID_AS_CONFED.getName()])
 
             except NameError as e:
                 print e
