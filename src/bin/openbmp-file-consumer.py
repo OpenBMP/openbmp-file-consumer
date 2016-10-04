@@ -86,8 +86,8 @@ def processCollectorMsg(msg, fdir):
         except:
             pass
 
-        COLLECTOR_LOGGERS[c_hash] = initLogger('openbmp.parsed.collector.' + c_hash,
-                                               os.path.join(filepath, 'collectors.txt'))
+        COLLECTOR_LOGGERS[c_hash] = initLogger('openbmp.parsed.collector.' + c_hash, os.path.join(filepath, 'collectors.txt'))
+
         newCollector = True
 
     # Log messages
@@ -177,8 +177,9 @@ def processRouterMsg(msg, fdir):
                     if c_hash not in ROUTER_LOGGERS:
                         ROUTER_LOGGERS[c_hash] = {}
 
-                    ROUTER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]] = initLogger('openbmp.parsed.router.' + row[MsgBusFields.HASH.getName()],
-                                                                     os.path.join(filepath, 'routers.txt'))
+
+                    ROUTER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]] = initLogger('openbmp.parsed.router.' + row[MsgBusFields.HASH.getName()], os.path.join(filepath, 'routers.txt'))
+
 
                 if row[MsgBusFields.ACTION.getName()] == "init":
                     ROUTER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]].info(
@@ -236,8 +237,7 @@ def processPeerMsg(msg, fdir):
                     if c_hash not in PEER_LOGGERS:
                         PEER_LOGGERS[c_hash] = {}
 
-                    PEER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]] = initLogger('openbmp.parsed.peer.' + row[MsgBusFields.HASH.getName()],
-                                                                   os.path.join(filepath, 'peers.txt'))
+                    PEER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]] = initLogger('openbmp.parsed.peer.' + row[MsgBusFields.HASH.getName()], os.path.join(filepath, 'peers.txt'))
 
                 if row[MsgBusFields.ACTION.getName()] == "up":
                     PEER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]].info(
@@ -330,6 +330,7 @@ def processBmpStatMsg(msg, fdir):
                     if c_hash not in BMP_STAT_LOGGERS:
                         BMP_STAT_LOGGERS[c_hash] = {}
 
+
                     BMP_STAT_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]] = initLogger(
                         'openbmp.parsed.bmp_stat.' + row[MsgBusFields.PEER_HASH.getName()],
                         os.path.join(filepath, 'bmp_stats.txt'))
@@ -338,10 +339,10 @@ def processBmpStatMsg(msg, fdir):
                     "%-27s Pre-RIB: %-10lu Post-RIB: %-10lu Rejected: %-10u Update Dups: %-10u Withdraw Dups: %-10u\n"
                     "    Invalid Cluster List: %-10u Invalid As Path: %-10u Invalid Originator Id: %-10u Invalid AS Confed: %-10u",
                     row[MsgBusFields.TIMESTAMP.getName()],
-                    row[MsgBusFields.PRE_POLICY.getName()], row[MsgBusFields.POST_POLICY.getName()], row[MsgBusFields.REJECTED.getName()], row[MsgBusFields.KNOWN_DUP_UPDATES.getName()],
-                    row[MsgBusFields.KNOWN_DUP_WITHDRAWS.getName()], row[MsgBusFields.INVALID_CLUSTER_LIST.getName()],
-                    row[MsgBusFields.INVALID_AS_PATH.getName()], row[MsgBusFields.INVALID_ORIGINATOR.getName()],
-                    row[MsgBusFields.INVALID_AS_CONFED.getName()])
+                    int(row[MsgBusFields.PRE_POLICY.getName()]), int(row[MsgBusFields.POST_POLICY.getName()]), int(row[MsgBusFields.REJECTED.getName()]), int(row[MsgBusFields.KNOWN_DUP_UPDATES.getName()]),
+                    int(row[MsgBusFields.KNOWN_DUP_WITHDRAWS.getName()]), int(row[MsgBusFields.INVALID_CLUSTER_LIST.getName()]),
+                    int(row[MsgBusFields.INVALID_AS_PATH.getName()]), int(row[MsgBusFields.INVALID_ORIGINATOR.getName()]),
+                    int(row[MsgBusFields.INVALID_AS_CONFED.getName()]))
 
             except NameError as e:
                 print e
@@ -650,7 +651,6 @@ def processBmpRawMsg(msg, fdir):
 
         BMP_RAW_LOGGERS[c_hash][r_hash] = init_raw_logger("openbmp.bmp_raw." + r_hash,
                                                           os.path.join(filepath, "bmp_feed.raw"))
-
     if BMP_RAW_LOGGERS[c_hash][r_hash]:
         BMP_RAW_LOGGERS[c_hash][r_hash].info(msg.getContent())
 
@@ -666,7 +666,7 @@ def processMessage(msg, fdir):
     try:
         m = Message(msg.value)  # Gets body of kafka message.
 
-        # print msg.value
+        #print msg.value
 
         if msg.topic == 'openbmp.parsed.collector':
             processCollectorMsg(m, fdir)
@@ -738,6 +738,7 @@ def init_raw_logger(name, filename):
 
 
 def initLogger(name, filename):
+    # type: (object, object) -> object
     """ Initialize a new logger instance
 
     :param name:        name of logger
