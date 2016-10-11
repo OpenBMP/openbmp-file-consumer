@@ -11,5 +11,5 @@ setup(name='openbmp-file-consumer',
       data_files=[('etc', ['src/etc/openbmp-file-consumer.yml'])],
       package_dir={'openbmp': 'src/site-packages/openbmp'},
       packages=['openbmp'],
-      scripts=['src/bin/openbmp-file-consumer.py']
+      scripts=['src/bin/openbmp-file-consumer']
      )
