@@ -9,7 +9,7 @@ setup(name='openbmp-file-consumer',
       author_email='tim@openbmp.org',
       url='',
       data_files=[('etc', ['src/etc/openbmp-file-consumer.yml'])],
-      package_dir={'': 'src/site-packages'},
+      package_dir={'openbmp': 'src/site-packages/openbmp'},
       packages=['openbmp'],
       scripts=['src/bin/openbmp-file-consumer.py']
      )
