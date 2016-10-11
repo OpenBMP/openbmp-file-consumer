@@ -22,7 +22,7 @@ import logging.handlers
 import kafka
 import traceback
 
-from openbmp.RawTimedRotatingFileHandler import RawTimedRotatingFileHandler
+from openbmp.file.RawTimedRotatingFileHandler import RawTimedRotatingFileHandler
 
 from openbmp.api.parsed.message import Message
 from openbmp.api.parsed.message import MsgBusFields
