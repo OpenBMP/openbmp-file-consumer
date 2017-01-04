@@ -22,18 +22,19 @@ import logging.handlers
 import kafka
 import traceback
 
-from openbmp.RawTimedRotatingFileHandler import RawTimedRotatingFileHandler
-from openbmp.parsed.headers import headers as parsed_headers
-from openbmp.parsed.collector import collector
-from openbmp.parsed.router import router
-from openbmp.parsed.peer import peer
-from openbmp.parsed.base_attribute import base_attribute
-from openbmp.parsed.unicast_prefix import unicast_prefix
-from openbmp.parsed.bmp_stat import bmp_stat
-from openbmp.parsed.ls_node import ls_node
-from openbmp.parsed.ls_link import ls_link
-from openbmp.parsed.ls_prefix import ls_prefix
+from openbmp.file.RawTimedRotatingFileHandler import RawTimedRotatingFileHandler
 
+from openbmp.api.parsed.message import Message
+from openbmp.api.parsed.message import MsgBusFields
+from openbmp.api.parsed.message import Router
+from openbmp.api.parsed.message import Collector
+from openbmp.api.parsed.message import Peer
+from openbmp.api.parsed.message import BmpStat
+from openbmp.api.parsed.message import BaseAttribute
+from openbmp.api.parsed.message import UnicastPrefix
+from openbmp.api.parsed.message import LsNode
+from openbmp.api.parsed.message import LsPrefix
+from openbmp.api.parsed.message import LsLink
 
 # Collector logger hash to keep track of file loggers for collector object/messages
 #     Key = <collector hash>
@@ -63,14 +64,17 @@ BMP_RAW_LOGGERS = {}
 CONFIG = {}
 
 
-def processCollectorMsg(c_hash, data, fdir):
+def processCollectorMsg(msg, fdir):
     """ Process collector message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = collector()
+    obj = Collector(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
+
     newCollector = False
 
     # Create logger if new
@@ -82,29 +86,29 @@ def processCollectorMsg(c_hash, data, fdir):
         except:
             pass
 
-        COLLECTOR_LOGGERS[c_hash] = initLogger('openbmp.parsed.collector.' + c_hash,
-                                               os.path.join(filepath, 'collectors.txt'))
+        COLLECTOR_LOGGERS[c_hash] = initLogger('openbmp.parsed.collector.' + c_hash, os.path.join(filepath, 'collectors.txt'))
+
         newCollector = True
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Save the collector admin ID to hash id
-                cur_ts = calendar.timegm(datetime.datetime.strptime(obj.getTimestamp(), "%Y-%m-%d %H:%M:%S.%f").timetuple())
-                COLLECTOR_ADMIN_ID[c_hash] = (obj.getAdminId(), cur_ts)
+                cur_ts = calendar.timegm(datetime.datetime.strptime(row[MsgBusFields.TIMESTAMP.getName()],
+                                                                    "%Y-%m-%d %H:%M:%S.%f").timetuple())
+                COLLECTOR_ADMIN_ID[c_hash] = (row[MsgBusFields.ADMIN_ID.getName()], cur_ts)
 
-                if obj.getAction() == 'heartbeat' and not newCollector:
+                if row[MsgBusFields.ACTION.getName()] == 'heartbeat' and not newCollector:
                     continue
 
                 COLLECTOR_LOGGERS[c_hash].info("%-27s Action: %-9s Admin Id: %s Hash Id: %s\n"
-                                               "    Connected Routers: %s", obj.getTimestamp(),
-                                               obj.getAction(), obj.getAdminId(), obj.getHashId(), obj.getRouters())
+                                               "    Connected Routers: %s", row[MsgBusFields.TIMESTAMP.getName()],
+                                               row[MsgBusFields.ACTION.getName()], row[MsgBusFields.ADMIN_ID.getName()],
+                                               row[MsgBusFields.HASH.getName()], row[MsgBusFields.ROUTERS.getName()])
 
                 # clean up
-                if obj.getAction() == 'stopped':
+                if row[MsgBusFields.ACTION.getName()] == 'stopped':
                     try:
                         del COLLECTOR_ADMIN_ID[c_hash]
                         del COLLECTOR_LOGGERS[c_hash]
@@ -146,23 +150,23 @@ def processCollectorMsg(c_hash, data, fdir):
                 pass
 
 
-def processRouterMsg(c_hash, data, fdir):
+def processRouterMsg(msg, fdir):
     """ Process Router message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = router()
+    obj = Router(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in ROUTER_LOGGERS or obj.getHashId() not in ROUTER_LOGGERS[c_hash]:
+                if c_hash not in ROUTER_LOGGERS or row[MsgBusFields.HASH.getName()] not in ROUTER_LOGGERS[c_hash]:
                     filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash)
 
                     try:
@@ -173,28 +177,29 @@ def processRouterMsg(c_hash, data, fdir):
                     if c_hash not in ROUTER_LOGGERS:
                         ROUTER_LOGGERS[c_hash] = {}
 
-                    ROUTER_LOGGERS[c_hash][obj.getHashId()] = initLogger('openbmp.parsed.router.' + obj.getHashId(),
-                                                                          os.path.join(filepath, 'routers.txt'))
 
-                if obj.getAction() == "init":
-                    ROUTER_LOGGERS[c_hash][obj.getHashId()].info(
-                            "%-27s Action: %-9s IP: %-16s Name: %s\n"
-                            "    Description: %s [%s]",
-                            obj.getTimestamp(), obj.getAction(), obj.getIpAddress(), obj.getName(),
-                            obj.getDescription(),obj.getInitData())
+                    ROUTER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]] = initLogger('openbmp.parsed.router.' + row[MsgBusFields.HASH.getName()], os.path.join(filepath, 'routers.txt'))
 
-                elif obj.getAction() == "term":
-                    ROUTER_LOGGERS[c_hash][obj.getHashId()].info(
-                            "%-27s Action: %-9s IP: %-16s Name: %s\n"
-                            "    Term Reason: [%d] %s [%s]",
-                            obj.getTimestamp(), obj.getAction(), obj.getIpAddress(), obj.getName(),
-                            obj.getTermCode(), obj.getTermReason(), obj.getTermData())
-                    del ROUTER_LOGGERS[c_hash][obj.getHashId()]
+
+                if row[MsgBusFields.ACTION.getName()] == "init":
+                    ROUTER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]].info(
+                        "%-27s Action: %-9s IP: %-16s Name: %s\n"
+                        "    Description: %s [%s]",
+                        row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.ACTION.getName()], row[MsgBusFields.IP_ADDRESS.getName()], row[MsgBusFields.NAME.getName()],
+                        row[MsgBusFields.DESCRIPTION.getName()], row[MsgBusFields.INIT_DATA.getName()])
+
+                elif row[MsgBusFields.ACTION.getName()] == "term":
+                    ROUTER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]].info(
+                        "%-27s Action: %-9s IP: %-16s Name: %s\n"
+                        "    Term Reason: [%d] %s [%s]",
+                        row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.ACTION.getName()], row[MsgBusFields.IP_ADDRESS.getName()], row[MsgBusFields.NAME.getName()],
+                        row[MsgBusFields.TERM_CODE.getName()], row[MsgBusFields.TERM_REASON.getName()], row[MsgBusFields.TERM_DATA.getName()])
+                    del ROUTER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
                 else:
-                    ROUTER_LOGGERS[c_hash][obj.getHashId()].info(
-                            "%-27s Action: %-9s IP: %-16s Name: %s",
-                            obj.getTimestamp(), obj.getAction(), obj.getIpAddress(), obj.getName())
+                    ROUTER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]].info(
+                        "%-27s Action: %-9s IP: %-16s Name: %s",
+                        row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.ACTION.getName()], row[MsgBusFields.IP_ADDRESS.getName()], row[MsgBusFields.NAME.getName()])
 
             except NameError as e:
                 print e
@@ -204,25 +209,25 @@ def processRouterMsg(c_hash, data, fdir):
                 pass
 
 
-def processPeerMsg(c_hash, data, fdir):
+def processPeerMsg(msg, fdir):
     """ Process Peer message
 
-    :param c_hash:      Collector Hash ID
-    :param data:         Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = peer()
+    obj = Peer(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in PEER_LOGGERS or obj.getHashId() not in PEER_LOGGERS[c_hash]:
+                if c_hash not in PEER_LOGGERS or row[MsgBusFields.HASH.getName()] not in PEER_LOGGERS[c_hash]:
                     filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash,
-                                            'ROUTER_' + resolveIp(obj.getRouterIp()))
+                                            'ROUTER_' + resolveIp(row[MsgBusFields.ROUTER_IP.getName()]))
 
                     try:
                         os.makedirs(filepath)
@@ -232,90 +237,90 @@ def processPeerMsg(c_hash, data, fdir):
                     if c_hash not in PEER_LOGGERS:
                         PEER_LOGGERS[c_hash] = {}
 
-                    PEER_LOGGERS[c_hash][obj.getHashId()] = initLogger('openbmp.parsed.peer.' + obj.getHashId(),
-                                                                       os.path.join(filepath, 'peers.txt'))
+                    PEER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]] = initLogger('openbmp.parsed.peer.' + row[MsgBusFields.HASH.getName()], os.path.join(filepath, 'peers.txt'))
 
-                if obj.getAction() == "up":
-                    PEER_LOGGERS[c_hash][obj.getHashId()].info(
-                            "%-27s Action: %-9s Name: %s [%s]\n"
-                            "    Remote IP: %s:%d AS: %u BGP Id: %s HD: %u RD: %s %s %s\n"
-                            "          Cap: %r\n"
-                            "    Local  IP: %s:%d AS: %u BGP Id: %s HD: %u\n"
-                            "          Cap: %r",
-                            obj.getTimestamp(), obj.getAction(), obj.getName(), obj.getInfoData(),
-                            obj.getRemoteIp(), obj.getRemotePort(), obj.getRemoteAsn(), obj.getRemoteBgpId(),
-                            obj.getRemoteHolddown(), obj.getPeerRd(),
-                            "L3VPN" if obj.isL3Vpn() else "",
-                            "Pre-Policy" if obj.isPrePolicy() else "Post-Policy",
-                            obj.getRecvCapabilities(),
-                            obj.getLocalIp(), obj.getLocalPort(), obj.getLocalAsn(), obj.getLocalBgpId(), obj.getAdvHolddown(),
-                            obj.getAdvCapabilities())
+                if row[MsgBusFields.ACTION.getName()] == "up":
+                    PEER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]].info(
+                        "%-27s Action: %-9s Name: %s [%s]\n"
+                        "    Remote IP: %s:%d AS: %u BGP Id: %s HD: %u RD: %s %s %s\n"
+                        "          Cap: %r\n"
+                        "    Local  IP: %s:%d AS: %u BGP Id: %s HD: %u\n"
+                        "          Cap: %r",
+                        row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.ACTION.getName()], row[MsgBusFields.NAME.getName()], row[MsgBusFields.INFO_DATA.getName()],
+                        row[MsgBusFields.REMOTE_IP.getName()], row[MsgBusFields.REMOTE_PORT.getName()], row[MsgBusFields.REMOTE_ASN.getName()], row[MsgBusFields.REMOTE_BGP_ID.getName()],
+                        row[MsgBusFields.REMOTE_HOLDDOWN.getName()], row[MsgBusFields.PEER_RD.getName()],
+                        "L3VPN" if row[MsgBusFields.IS_L3VPN.getName()] else "",
+                        "Pre-Policy" if row[MsgBusFields.ISPREPOLICY.getName()] else "Post-Policy",
+                        row[MsgBusFields.RECV_CAP.getName()], row[MsgBusFields.LOCAL_IP.getName()], row[MsgBusFields.LOCAL_PORT.getName()],
+                        row[MsgBusFields.LOCAL_ASN.getName()], row[MsgBusFields.LOCAL_BGP_ID.getName()], row[MsgBusFields.ADV_HOLDDOWN.getName()],
+                        row[MsgBusFields.ADV_CAP.getName()])
 
-                elif obj.getAction() == "down":
-                    PEER_LOGGERS[c_hash][obj.getHashId()].info(
-                            "%-27s Action: %-9s Name: %s\n"
-                            "    Remote IP: %s AS: %u BGP Id: %s RD: %s %s %s\n"
-                            "    Term Info: %d bgp: %d/%d %s",
-                            obj.getTimestamp(), obj.getAction(), obj.getName(),
-                            obj.getRemoteIp(), obj.getRemoteAsn(), obj.getRemoteBgpId(),obj.getPeerRd(),
-                            "L3VPN" if obj.isL3Vpn() else "",
-                            "Pre-Policy" if obj.isPrePolicy() else "Post-Policy",
-                            obj.getBmpReasonCode(), obj.getBgpErrorCode(), obj.getBgpSubErrorCode(), obj.getErrorText())
+                elif row[MsgBusFields.ACTION.getName()] == "down":
+                    PEER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]].info(
+                        "%-27s Action: %-9s Name: %s\n"
+                        "    Remote IP: %s AS: %u BGP Id: %s RD: %s %s %s\n"
+                        "    Term Info: %d bgp: %d/%d %s",
+                        row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.ACTION.getName()], row[MsgBusFields.NAME.getName()],
+                        row[MsgBusFields.REMOTE_IP.getName()], row[MsgBusFields.REMOTE_ASN.getName()], row[MsgBusFields.REMOTE_BGP_ID.getName()], row[MsgBusFields.PEER_RD.getName()],
+                        "L3VPN" if row[MsgBusFields.IS_L3VPN.getName()] else "",
+                        "Pre-Policy" if row[MsgBusFields.ISPREPOLICY.getName()] else "Post-Policy",
+                        row[MsgBusFields.BMP_REASON.getName()], row[MsgBusFields.BGP_ERROR_CODE.getName()], row[MsgBusFields.BGP_ERROR_SUB_CODE.getName()], row[MsgBusFields.ERROR_TEXT.getName()])
 
-                    del PEER_LOGGERS[c_hash][obj.getHashId()]
+                    del PEER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
-                    if c_hash in BMP_STAT_LOGGERS and obj.getHashId() in BMP_STAT_LOGGERS[c_hash]:
-                        del BMP_STAT_LOGGERS[c_hash][obj.getHashId()]
+                    if c_hash in BMP_STAT_LOGGERS and row[MsgBusFields.HASH.getName()] in BMP_STAT_LOGGERS[c_hash]:
+                        del BMP_STAT_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
-                    if c_hash in BASE_ATTR_LOGGERS and obj.getHashId() in BASE_ATTR_LOGGERS[c_hash]:
-                        del BASE_ATTR_LOGGERS[c_hash][obj.getHashId()]
+                    if c_hash in BASE_ATTR_LOGGERS and row[MsgBusFields.HASH.getName()] in BASE_ATTR_LOGGERS[c_hash]:
+                        del BASE_ATTR_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
-                    if c_hash in UNICAST_PREFIX_LOGGERS and obj.getHashId() in UNICAST_PREFIX_LOGGERS[c_hash]:
-                        del UNICAST_PREFIX_LOGGERS[c_hash][obj.getHashId()]
+                    if c_hash in UNICAST_PREFIX_LOGGERS and row[MsgBusFields.HASH.getName()] in UNICAST_PREFIX_LOGGERS[c_hash]:
+                        del UNICAST_PREFIX_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
-                    if c_hash in LS_NODE_LOGGERS and obj.getHashId() in LS_NODE_LOGGERS[c_hash]:
-                        del LS_NODE_LOGGERS[c_hash][obj.getHashId()]
+                    if c_hash in LS_NODE_LOGGERS and row[MsgBusFields.HASH.getName()] in LS_NODE_LOGGERS[c_hash]:
+                        del LS_NODE_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
-                    if c_hash in LS_LINK_LOGGERS and obj.getHashId() in LS_LINK_LOGGERS[c_hash]:
-                        del LS_LINK_LOGGERS[c_hash][obj.getHashId()]
+                    if c_hash in LS_LINK_LOGGERS and row[MsgBusFields.HASH.getName()] in LS_LINK_LOGGERS[c_hash]:
+                        del LS_LINK_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
-                    if c_hash in LS_PREFIX_LOGGERS and obj.getHashId() in LS_PREFIX_LOGGERS[c_hash]:
-                        del LS_PREFIX_LOGGERS[c_hash][obj.getHashId()]
+                    if c_hash in LS_PREFIX_LOGGERS and row[MsgBusFields.HASH.getName()] in LS_PREFIX_LOGGERS[c_hash]:
+                        del LS_PREFIX_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]]
 
 
                 else:
-                    PEER_LOGGERS[c_hash][obj.getHashId()].info(
-                            "%-27s Action: %-9s Name: %s\n"
-                            "    Remote IP: %s AS: %u BGP Id: %s RD: %s %s %s",
-                            obj.getTimestamp(), obj.getAction(), obj.getName(),
-                            obj.getRemoteIp(), obj.getRemoteAsn(), obj.getRemoteBgpId(),obj.getPeerRd(),
-                            "L3VPN" if obj.isL3Vpn() else "",
-                            "Pre-Policy" if obj.isPrePolicy() else "Post-Policy")
+                    PEER_LOGGERS[c_hash][row[MsgBusFields.HASH.getName()]].info(
+                        "%-27s Action: %-9s Name: %s\n"
+                        "    Remote IP: %s AS: %u BGP Id: %s RD: %s %s %s",
+                        row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.ACTION.getName()], row[MsgBusFields.NAME.getName()],
+                        row[MsgBusFields.REMOTE_IP.getName()], row[MsgBusFields.REMOTE_ASN.getName()], row[MsgBusFields.REMOTE_BGP_ID.getName()], row[MsgBusFields.PEER_RD.getName()],
+                        "L3VPN" if row[MsgBusFields.IS_L3VPN.getName()] else "",
+                        "Pre-Policy" if row[MsgBusFields.ISPREPOLICY.getName()] else "Post-Policy")
 
             except NameError as e:
                 print e
                 print "row = [%d] (%r)" % (len(row), row)
 
 
-def processBmpStatMsg(c_hash, data, fdir):
+def processBmpStatMsg(msg, fdir):
     """ Process Bmp Stats message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = bmp_stat()
+
+    obj = BmpStat(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in BMP_STAT_LOGGERS or obj.getPeerHashId() not in BMP_STAT_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
-                                            'PEER_' + resolveIp(obj.getPeerIp()))
+                if c_hash not in BMP_STAT_LOGGERS or row[MsgBusFields.PEER_HASH.getName()] not in BMP_STAT_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row[MsgBusFields.ROUTER_IP.getName()]),
+                                            'PEER_' + resolveIp(row[MsgBusFields.PEER_IP.getName()]))
 
                     try:
                         os.makedirs(filepath)
@@ -325,42 +330,44 @@ def processBmpStatMsg(c_hash, data, fdir):
                     if c_hash not in BMP_STAT_LOGGERS:
                         BMP_STAT_LOGGERS[c_hash] = {}
 
-                    BMP_STAT_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.bmp_stat.' + obj.getPeerHashId(),
-                                                                          os.path.join(filepath, 'bmp_stats.txt'))
 
-                BMP_STAT_LOGGERS[c_hash][obj.getPeerHashId()].info(
-                                "%-27s Pre-RIB: %-10lu Post-RIB: %-10lu Rejected: %-10u Update Dups: %-10u Withdraw Dups: %-10u\n"
-                                "    Invalid Cluster List: %-10u Invalid As Path: %-10u Invalid Originator Id: %-10u Invalid AS Confed: %-10u",
-                                obj.getTimestamp(),
-                                obj.getPrePolicyPrefixes(), obj.getPostPolicyPrefixes(), obj.getRejectedPrefixes(), obj.getKnownDupPrefixes(),
-                                obj.getKnownDupWithdrawPrefixes(), obj.getInvalidClusterListPrefixes(),
-                                obj.getInvalidAsPathPrefixes(), obj.getInvalidOriginatorIdPrefixes(),
-                                obj.getInvalidAsConffedPrefixes())
+                    BMP_STAT_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]] = initLogger(
+                        'openbmp.parsed.bmp_stat.' + row[MsgBusFields.PEER_HASH.getName()],
+                        os.path.join(filepath, 'bmp_stats.txt'))
+
+                BMP_STAT_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]].info(
+                    "%-27s Pre-RIB: %-10lu Post-RIB: %-10lu Rejected: %-10u Update Dups: %-10u Withdraw Dups: %-10u\n"
+                    "    Invalid Cluster List: %-10u Invalid As Path: %-10u Invalid Originator Id: %-10u Invalid AS Confed: %-10u",
+                    row[MsgBusFields.TIMESTAMP.getName()],
+                    int(row[MsgBusFields.PRE_POLICY.getName()]), int(row[MsgBusFields.POST_POLICY.getName()]), int(row[MsgBusFields.REJECTED.getName()]), int(row[MsgBusFields.KNOWN_DUP_UPDATES.getName()]),
+                    int(row[MsgBusFields.KNOWN_DUP_WITHDRAWS.getName()]), int(row[MsgBusFields.INVALID_CLUSTER_LIST.getName()]),
+                    int(row[MsgBusFields.INVALID_AS_PATH.getName()]), int(row[MsgBusFields.INVALID_ORIGINATOR.getName()]),
+                    int(row[MsgBusFields.INVALID_AS_CONFED.getName()]))
 
             except NameError as e:
                 print e
                 print "row = [%d] (%r)" % (len(row), row)
 
 
-def processBaseAttributeMsg(c_hash, data, fdir):
+def processBaseAttributeMsg(msg, fdir):
     """ Process Base attribute message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = base_attribute()
+    obj = BaseAttribute(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in BASE_ATTR_LOGGERS or obj.getPeerHashId() not in BASE_ATTR_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
-                                            'PEER_' + resolveIp(obj.getPeerIp()))
+                if c_hash not in BASE_ATTR_LOGGERS or row[MsgBusFields.PEER_HASH.getName()] not in BASE_ATTR_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row[MsgBusFields.ROUTER_IP.getName()]),
+                                            'PEER_' + resolveIp(row[MsgBusFields.PEER_IP.getName()]))
 
                     try:
                         os.makedirs(filepath)
@@ -370,46 +377,48 @@ def processBaseAttributeMsg(c_hash, data, fdir):
                     if c_hash not in BASE_ATTR_LOGGERS:
                         BASE_ATTR_LOGGERS[c_hash] = {}
 
-                    BASE_ATTR_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.base_attribute.' + obj.getPeerHashId(),
-                                                                                os.path.join(filepath, 'base_attributes.txt'))
+                    BASE_ATTR_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]] = initLogger(
+                        'openbmp.parsed.base_attribute.' + row[MsgBusFields.PEER_HASH.getName()],
+                        os.path.join(filepath, 'base_attributes.txt'))
 
-                BASE_ATTR_LOGGERS[c_hash][obj.getPeerHashId()].info(
-                                "%-27s Origin AS: %-10u AS Count: %-6d NH: %-16s LP: %-3u MED: %-8u Origin: %s\n"
-                                "    Aggregator: %-18s %s ClusterList: %-24s Originator Id: %s\n"
-                                "    Path: %s %s %s",
-                                obj.getTimestamp(), obj.getOriginAs(), obj.getAsPathCount(), obj.getNexthop(),
-                                obj.getLocalPref(), obj.getMed(), obj.getOrigin(), obj.getAggregator(),
-                                "[ Atomic ]" if obj.isAttomicAggregate() else "",
-                                obj.getClusterList(), obj.getOriginatorId(), obj.getAsPath(),
-                                obj.getCommunityList() + '\n' if len(obj.getClusterList()) > 0 else "",
-                                obj.getExtCommunityList() + '\n' if len(obj.getExtCommunityList()) > 0 else "")
+                BASE_ATTR_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]].info(
+                    "%-27s Origin AS: %-10u AS Count: %-6d NH: %-16s LP: %-3u MED: %-8u Origin: %s\n"
+                    "    Aggregator: %-18s %s ClusterList: %-24s Originator Id: %s\n"
+                    "    Path: %s %s %s",
+                    row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.ORIGIN_AS.getName()], row[MsgBusFields.AS_PATH_COUNT.getName()], row[MsgBusFields.NEXTHOP.getName()],
+                    row[MsgBusFields.LOCAL_PREF.getName()], row[MsgBusFields.MED.getName()], row[MsgBusFields.ORIGIN.getName()], row[MsgBusFields.AGGREGATOR.getName()],
+                    "[ Atomic ]" if row[MsgBusFields.ISATOMICAGG.getName()] else "",
+                    row[MsgBusFields.CLUSTER_LIST.getName()], row[MsgBusFields.ORIGINATOR_ID.getName()], row[MsgBusFields.AS_PATH.getName()],
+                    row[MsgBusFields.COMMUNITY_LIST.getName()] + '\n' if len(row[MsgBusFields.CLUSTER_LIST.getName()]) > 0 else "",
+                    row[MsgBusFields.EXT_COMMUNITY_LIST.getName()] + '\n' if len(row[MsgBusFields.EXT_COMMUNITY_LIST.getName()]) > 0 else "")
 
             except NameError as e:
                 print "---------"
                 print e
-                print data
+                print msg.getContent()
                 print "row = [%d] (%r)" % (len(row), row)
 
 
-def processUnicastPrefixMsg(c_hash, data, fdir):
+def processUnicastPrefixMsg(msg, fdir):
     """ Process Unicast prefix message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = unicast_prefix()
+
+    obj = UnicastPrefix(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in UNICAST_PREFIX_LOGGERS or obj.getPeerHashId() not in UNICAST_PREFIX_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
-                                            'PEER_' + resolveIp(obj.getPeerIp()))
+                if c_hash not in UNICAST_PREFIX_LOGGERS or row[MsgBusFields.PEER_HASH.getName()] not in UNICAST_PREFIX_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row[MsgBusFields.ROUTER_IP.getName()]),
+                                            'PEER_' + resolveIp(row[MsgBusFields.PEER_IP.getName()]))
 
                     try:
                         os.makedirs(filepath)
@@ -419,54 +428,57 @@ def processUnicastPrefixMsg(c_hash, data, fdir):
                     if c_hash not in UNICAST_PREFIX_LOGGERS:
                         UNICAST_PREFIX_LOGGERS[c_hash] = {}
 
-                    UNICAST_PREFIX_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.unicast_prefix.' + obj.getPeerHashId(),
-                                                                                os.path.join(filepath, 'unicast_prefixes.txt'))
+                    UNICAST_PREFIX_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]] = initLogger(
+                        'openbmp.parsed.unicast_prefix.' + row[MsgBusFields.PEER_HASH.getName()],
+                        os.path.join(filepath, 'unicast_prefixes.txt'))
 
-                printAggLine = True if len(obj.getClusterList()) or len(obj.getAggregator()) or len(obj.getOriginatorId()) else False
+                printAggLine = True if len(row[MsgBusFields.CLUSTER_LIST.getName()]) or len(row[MsgBusFields.AGGREGATOR.getName()]) or len(
+                    row[MsgBusFields.ORIGINATOR_ID.getName()]) else False
 
-                UNICAST_PREFIX_LOGGERS[c_hash][obj.getPeerHashId()].info(
-                                "%-27s Prefix: %-40s Origin AS: %-10u\n"
-                                "           AS Count: %-6d NH: %-16s LP: %-3u MED: %-8u Origin: %s %s"
-                                "               Path: %s %s %s",
-                                obj.getTimestamp(), obj.getPrefix(),
-                                obj.getOriginAs(), obj.getAsPathCount(), obj.getNexthop(),
-                                obj.getLocalPref(), obj.getMed(), obj.getOrigin(),
-                                "         Aggregator: %s %s ClusterList: %s Originator Id: %s\n" % (
-                                                obj.getAggregator(),
-                                                "[ Atomic ]" if obj.isAtomicAggregate()
-                                                        else "",
-                                                obj.getClusterList(), obj.getOriginatorId()),
-                                obj.getAsPath(),
-                                "\n        Communities: " + obj.getCommunityList() + '\n' if len(obj.getCommunityList()) > 0 else "",
-                                "\n    Ext Communities: " + obj.getExtCommunityList() + '\n' if len(obj.getExtCommunityList()) > 0 else "")
+                UNICAST_PREFIX_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]].info(
+                    "%-27s Prefix: %-40s Origin AS: %-10u\n"
+                    "           AS Count: %-6d NH: %-16s LP: %-3u MED: %-8u Origin: %s %s"
+                    "               Path: %s %s %s",
+                    row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.PREFIX.getName()],
+                    row[MsgBusFields.ORIGIN_AS.getName()], row[MsgBusFields.AS_PATH_COUNT.getName()], row[MsgBusFields.NEXTHOP.getName()],
+                    row[MsgBusFields.LOCAL_PREF.getName()], row[MsgBusFields.MED.getName()], row[MsgBusFields.ORIGIN.getName()],
+                    "         Aggregator: %s %s ClusterList: %s Originator Id: %s\n" % (
+                        row[MsgBusFields.AGGREGATOR.getName()],
+                        "[ Atomic ]" if row[MsgBusFields.ISATOMICAGG.getName()]
+                        else "",
+                        row[MsgBusFields.CLUSTER_LIST.getName()], row[MsgBusFields.ORIGINATOR_ID.getName()]),
+                    row[MsgBusFields.AS_PATH.getName()],
+                    "\n        Communities: " + row[MsgBusFields.COMMUNITY_LIST.getName()] + '\n' if len(row[MsgBusFields.COMMUNITY_LIST.getName()]) > 0 else "",
+                    "\n    Ext Communities: " + row[MsgBusFields.EXT_COMMUNITY_LIST.getName()] + '\n' if len(
+                        row[MsgBusFields.EXT_COMMUNITY_LIST.getName()]) > 0 else "")
 
             except NameError as e:
 
                 print "++++++"
                 print e
-                print data
+                print msg.getContent()
                 print "row = [%d] (%r)" % (len(row), row)
 
 
-def processLsNodeMsg(c_hash, data, fdir):
+def processLsNodeMsg(msg, fdir):
     """ Process LS Node message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = ls_node()
+    obj = LsNode(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in LS_NODE_LOGGERS or obj.getPeerHashId() not in LS_NODE_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
-                                            'PEER_' + resolveIp(obj.getPeerIp()))
+                if c_hash not in LS_NODE_LOGGERS or row[MsgBusFields.PEER_HASH.getName()] not in LS_NODE_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row[MsgBusFields.ROUTER_IP.getName()]),
+                                            'PEER_' + resolveIp(row[MsgBusFields.PEER_IP.getName()]))
 
                     try:
                         os.makedirs(filepath)
@@ -476,44 +488,44 @@ def processLsNodeMsg(c_hash, data, fdir):
                     if c_hash not in LS_NODE_LOGGERS:
                         LS_NODE_LOGGERS[c_hash] = {}
 
-                    LS_NODE_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.ls_node.' + obj.getPeerHashId(),
-                                                                          os.path.join(filepath, 'ls_nodes.txt'))
+                    LS_NODE_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]] = initLogger('openbmp.parsed.ls_node.' + row[MsgBusFields.PEER_HASH.getName()],
+                                                                           os.path.join(filepath, 'ls_nodes.txt'))
 
-                LS_NODE_LOGGERS[c_hash][obj.getPeerHashId()].info(
-                                "%-27s RID: %-46s Hash Id: %-32s RoutingID: 0x%s Name: %s\n"
-                                "    Proto: %-10s LsId: 0x%s MT Id: %-7u Area: %s Flags: %s\n"
-                                "    AS Path: %s LP: %u MED: %u NH: %s",
-                                obj.getTimestamp(), obj.getIgpRouterId() + '/' + obj.getRouterId(),
-                                obj.getHashId(), obj.getRoutingId(), obj.getName(), obj.getProtocol(), obj.getLsId(),
-                                obj.getMtId(), obj.getOspfAreaId() if len(obj.getOspfAreaId()) else obj.getIsisAreaId(),
-                                obj.getFlags(), obj.getAsPath(), obj.getLocalPref(), obj.getMed(), obj.getNexthop())
+                LS_NODE_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]].info(
+                    "%-27s RID: %-46s Hash Id: %-32s RoutingID: 0x%s Name: %s\n"
+                    "    Proto: %-10s LsId: 0x%s MT Id: %-7u Area: %s Flags: %s\n"
+                    "    AS Path: %s LP: %u MED: %u NH: %s",
+                    row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.IGP_ROUTER_ID.getName()] + '/' + row[MsgBusFields.ROUTER_ID.getName()],
+                    row[MsgBusFields.HASH.getName()], row[MsgBusFields.ROUTING_ID.getName()], row[MsgBusFields.NAME.getName()], row[MsgBusFields.PROTOCOL.getName()], row[MsgBusFields.LS_ID.getName()],
+                    row[MsgBusFields.MT_ID.getName()], row[MsgBusFields.OSPF_AREA_ID.getName()] if len(row[MsgBusFields.OSPF_AREA_ID.getName()]) else row[MsgBusFields.ISIS_AREA_ID.getName()],
+                    row[MsgBusFields.FLAGS.getName()], row[MsgBusFields.AS_PATH.getName()], row[MsgBusFields.LOCAL_PREF.getName()], row[MsgBusFields.MED.getName()], row[MsgBusFields.NEXTHOP.getName()])
 
             except NameError as e:
                 print "----"
                 print e
-                print data
+                print msg.getContent()
                 print "ls_node: row = [%d] (%r)" % (len(row), row)
 
 
-def processLsLinkMsg(c_hash, data, fdir):
+def processLsLinkMsg(msg, fdir):
     """ Process LS Link message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = ls_link()
+    obj = LsLink(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in LS_LINK_LOGGERS or obj.getPeerHashId() not in LS_LINK_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
-                                            'PEER_' + resolveIp(obj.getPeerIp()))
+                if c_hash not in LS_LINK_LOGGERS or row[MsgBusFields.PEER_HASH.getName()] not in LS_LINK_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(row[MsgBusFields.ROUTER_IP.getName()]),
+                                            'PEER_' + resolveIp(row[MsgBusFields.PEER_IP.getName()]))
 
                     try:
                         os.makedirs(filepath)
@@ -523,52 +535,53 @@ def processLsLinkMsg(c_hash, data, fdir):
                     if c_hash not in LS_LINK_LOGGERS:
                         LS_LINK_LOGGERS[c_hash] = {}
 
-                    LS_LINK_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.ls_link.' + obj.getPeerHashId(),
-                                                                          os.path.join(filepath, 'ls_links.txt'))
+                    LS_LINK_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]] = initLogger('openbmp.parsed.ls_link.' + row[MsgBusFields.PEER_HASH.getName()],
+                                                                           os.path.join(filepath, 'ls_links.txt'))
 
-                LS_LINK_LOGGERS[c_hash][obj.getPeerHashId()].info(
-                                "%-27s RID: %-46s Hash Id: %-32s RoutingID: 0x%s \n"
-                                "    Proto: %-10s LsId: 0x%s MT Id: %s Area: %s Adm Grp: %u SRLG: %s Name: %s\n"
-                                "    Metric: %u Link Id (local/remote): %u/%u Interface IP (local/remote): %s/%s"
-                                "    Node Hash Id (local/remote): %s/%s\n"
-                                "    AS Path: %s LP: %u MED: %u NH: %s %s",
-                                obj.getTimestamp(), obj.getIgpRouterId() + '/' + obj.getRouterId(),
-                                obj.getHashId(), obj.getRoutingId(), obj.getProtocol(), obj.getLsId(),
-                                obj.getMtId(), obj.getOspfAreaId() if len(obj.getOspfAreaId()) else obj.getIsisAreaId(),
-                                obj.getAdminGroup(), obj.getSrlg(), obj.getLinkName(),
-                                obj.getIgpMetric(),obj.getLocalLinkId(), obj.getRemoteLinkId(), obj.getInterfaceIp(),
-                                obj.getNeighborIp(),obj.getLocalNodeHashId(), obj.getRemoteNodeHashId(),
-                                obj.getAsPath(), obj.getLocalPref(), obj.getMed(),obj.getNexthop(),
-                                "\n    MPLS Proto: %s Protection: %s TE Metric: %u Max Link BW: %f Max Resv BW: %f Unresv BW: %s" %
-                                    (obj.getMplsProtoMask(), obj.getLinkProtection(), obj.getTeDefaultMetric(),
-                                     obj.getMaxLinkBw(), obj.getMaxResvBw(), obj.getUnreservedBw()) if obj.getTeDefaultMetric() else "")
+                LS_LINK_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]].info(
+                    "%-27s RID: %-46s Hash Id: %-32s RoutingID: 0x%s \n"
+                    "    Proto: %-10s LsId: 0x%s MT Id: %s Area: %s Adm Grp: %u SRLG: %s Name: %s\n"
+                    "    Metric: %u Link Id (local/remote): %u/%u Interface IP (local/remote): %s/%s"
+                    "    Node Hash Id (local/remote): %s/%s\n"
+                    "    AS Path: %s LP: %u MED: %u NH: %s %s",
+                    row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.IGP_ROUTER_ID.getName()] + '/' + row[MsgBusFields.ROUTER_ID.getName()],
+                    row[MsgBusFields.HASH.getName()], row[MsgBusFields.ROUTING_ID.getName()], row[MsgBusFields.PROTOCOL.getName()], row[MsgBusFields.LS_ID.getName()],
+                    row[MsgBusFields.MT_ID.getName()], row[MsgBusFields.OSPF_AREA_ID.getName()] if len(row[MsgBusFields.OSPF_AREA_ID.getName()]) else row[MsgBusFields.ISIS_AREA_ID.getName()],
+                    row[MsgBusFields.ADMIN_GROUP.getName()], row[MsgBusFields.SRLG.getName()], row[MsgBusFields.LINK_NAME.getName()],
+                    row[MsgBusFields.IGP_METRIC.getName()], row[MsgBusFields.LOCAL_LINK_ID.getName()], row[MsgBusFields.REMOTE_LINK_ID.getName()], row[MsgBusFields.INTF_IP.getName()],
+                    row[MsgBusFields.NEI_IP.getName()], row[MsgBusFields.LOCAL_NODE_HASH.getName()], row[MsgBusFields.REMOTE_NODE_HASH.getName()],
+                    row[MsgBusFields.AS_PATH.getName()], row[MsgBusFields.LOCAL_PREF.getName()], row[MsgBusFields.MED.getName()], row[MsgBusFields.NEXTHOP.getName()],
+                    "\n    MPLS Proto: %s Protection: %s TE Metric: %u Max Link BW: %f Max Resv BW: %f Unresv BW: %s" %
+                    (row[MsgBusFields.MPLS_PROTO_MASK.getName()], row[MsgBusFields.LINK_PROTECTION.getName()], row[MsgBusFields.TE_DEFAULT_METRIC.getName()],
+                     row[MsgBusFields.MAX_LINK_BW.getName()], row[MsgBusFields.MAX_RESV_BW.getName()], row[MsgBusFields.UNRESV_BW.getName()]) if row[MsgBusFields.TE_DEFAULT_METRIC.getName()] else "")
 
             except NameError as e:
                 print "----"
                 print e
-                print data
+                print msg.getContent()
                 print "ls_link: row = [%d] (%r)" % (len(row), row)
 
 
-def processLsPrefixMsg(c_hash, data, fdir):
+def processLsPrefixMsg(msg, fdir):
     """ Process LS Prefix message
 
-    :param c_hash:      Collector Hash ID
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
-    obj = ls_prefix()
+    obj = LsPrefix(msg)
+
+    c_hash = msg.getCollector_hash_id()
+    map_list = obj.getRowMap()
 
     # Log messages
-    for row in data.split('\n'):
-        if (len(row)):
+    for row in map_list:
+        if len(row):
             try:
-                obj.parse(row)
-
                 # Create logger
-                if c_hash not in LS_PREFIX_LOGGERS or obj.getPeerHashId() not in LS_PREFIX_LOGGERS[c_hash]:
-                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(obj.getRouterIp()),
-                                            'PEER_' + resolveIp(obj.getPeerIp()))
+                if c_hash not in LS_PREFIX_LOGGERS or row[MsgBusFields.PEER_HASH.getName()] not in LS_PREFIX_LOGGERS[c_hash]:
+                    filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash,
+                                            'ROUTER_' + resolveIp(row[MsgBusFields.ROUTER_IP.getName()]),
+                                            'PEER_' + resolveIp(row[MsgBusFields.PEER_IP.getName()]))
 
                     try:
                         os.makedirs(filepath)
@@ -578,38 +591,52 @@ def processLsPrefixMsg(c_hash, data, fdir):
                     if c_hash not in LS_PREFIX_LOGGERS:
                         LS_PREFIX_LOGGERS[c_hash] = {}
 
-                    LS_PREFIX_LOGGERS[c_hash][obj.getPeerHashId()] = initLogger('openbmp.parsed.ls_prefix.' + obj.getPeerHashId(),
-                                                                          os.path.join(filepath, 'ls_prefixes.txt'))
+                    LS_PREFIX_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]] = initLogger(
+                        'openbmp.parsed.ls_prefix.' + row[MsgBusFields.PEER_HASH.getName()],
+                        os.path.join(filepath, 'ls_prefixes.txt'))
 
-                LS_PREFIX_LOGGERS[c_hash][obj.getPeerHashId()].info(
-                                "%-27s RID: %-46s Prefix: %-32s Hash Id: %-32s RoutingID: 0x%s \n"
-                                "    Proto: %-10s LsId: 0x%s MT Id: %s Area: %s %s %s\n"
-                                "    Metric: %u Flags: %s RTag: %u Ext RTag: 0x%s"
-                                "    Local Node Hash Id: %s AS Path: %s LP: %u MED: %u NH: %s",
-                                obj.getTimestamp(), obj.getIgpRouterId() + '/' + obj.getRouterId(),
-                                obj.getPrefix(), obj.getHashId(), obj.getRoutingId(), obj.getProtocol(), obj.getLsId(),
-                                obj.getMtId(), obj.getOspfAreaId() if len(obj.getOspfAreaId()) else obj.getIsisAreaId(),
-                                " Route Type: %s" % obj.getOspfRouteType() if len(obj.getOspfRouteType()) else "",
-                                " Fwd Addr: %s" % obj.getOspfFwdAddress() if len(obj.getOspfFwdAddress()) else "",
-                                obj.getIgpMetric(), obj.getIgpFlags(), obj.getRouteTag(), obj.getExtRouteTag(),
-                                obj.getLocalNodeHashId(), obj.getAsPath(), obj.getLocalPref(), obj.getMed(), obj.getNexthop())
+                LS_PREFIX_LOGGERS[c_hash][row[MsgBusFields.PEER_HASH.getName()]].info(
+                    "%-27s RID: %-46s Prefix: %-32s Hash Id: %-32s RoutingID: 0x%s \n"
+                    "    Proto: %-10s LsId: 0x%s MT Id: %s Area: %s %s %s\n"
+                    "    Metric: %u Flags: %s RTag: %u Ext RTag: 0x%s"
+                    "    Local Node Hash Id: %s AS Path: %s LP: %u MED: %u NH: %s",
+                    row[MsgBusFields.TIMESTAMP.getName()], row[MsgBusFields.IGP_ROUTER_ID.getName()] + '/' +
+                                                           row[MsgBusFields.ROUTER_ID.getName()],
+                                                           row[MsgBusFields.PREFIX.getName()] + '/' +
+                                                           str(row[MsgBusFields.PREFIX_LEN.getName()]),
+                    row[MsgBusFields.HASH.getName()],
+                    row[MsgBusFields.ROUTING_ID.getName()], row[MsgBusFields.PROTOCOL.getName()],
+                    row[MsgBusFields.LS_ID.getName()], row[MsgBusFields.MT_ID.getName()],
+                    row[MsgBusFields.OSPF_AREA_ID.getName()]
+                    if len(row[MsgBusFields.OSPF_AREA_ID.getName()]) else row[MsgBusFields.ISIS_AREA_ID.getName()],
+                    " Route Type: %s" % row[MsgBusFields.OSPF_ROUTE_TYPE.getName()] if len(
+                        row[MsgBusFields.OSPF_ROUTE_TYPE.getName()]) else "",
+                    " Fwd Addr: %s" % row[MsgBusFields.OSPF_FWD_ADDR.getName()] if len(
+                        row[MsgBusFields.OSPF_FWD_ADDR.getName()]) else "",
+                    row[MsgBusFields.IGP_METRIC.getName()], row[MsgBusFields.IGP_FLAGS.getName()],
+                    row[MsgBusFields.ROUTE_TAG.getName()], row[MsgBusFields.EXT_ROUTE_TAG.getName()],
+                    row[MsgBusFields.LOCAL_NODE_HASH.getName()], row[MsgBusFields.AS_PATH.getName()],
+                    row[MsgBusFields.LOCAL_PREF.getName()], row[MsgBusFields.MED.getName()],
+                    row[MsgBusFields.NEXTHOP.getName()])
 
             except NameError as e:
                 print "----"
                 print e
-                print data
+                print msg.getContent()
                 print "ls_prefix: row = [%d] (%r)" % (len(row), row)
 
 
-def processBmpRawMsg(c_hash, r_hash, r_ip, data, fdir):
+def processBmpRawMsg(msg, fdir):
     """ Process BMP RAW message
 
-    :param c_hash:      Collector Hash ID
-    :param r_hash:      Router Hash ID
-    :param r_ip:        Router IP address
-    :param data:        Message data to be consumed (should not contain headers)
+    :param msg:      Message object
     :param fdir:        Directory where to store the parsed files
     """
+
+    c_hash = msg.getCollector_hash_id()
+    r_hash = msg.getRouter_hash_id()
+    r_ip = msg.getRouterIp()
+
     # Create logger
     if c_hash not in BMP_RAW_LOGGERS or r_hash not in BMP_RAW_LOGGERS[c_hash]:
         filepath = os.path.join(fdir, 'COLLECTOR_' + c_hash, 'ROUTER_' + resolveIp(r_ip))
@@ -624,9 +651,8 @@ def processBmpRawMsg(c_hash, r_hash, r_ip, data, fdir):
 
         BMP_RAW_LOGGERS[c_hash][r_hash] = init_raw_logger("openbmp.bmp_raw." + r_hash,
                                                           os.path.join(filepath, "bmp_feed.raw"))
-
     if BMP_RAW_LOGGERS[c_hash][r_hash]:
-        BMP_RAW_LOGGERS[c_hash][r_hash].info(data)
+        BMP_RAW_LOGGERS[c_hash][r_hash].info(msg.getContent())
 
 
 def processMessage(msg, fdir):
@@ -638,42 +664,39 @@ def processMessage(msg, fdir):
     :return:
     """
     try:
-        (headers, data) = msg.value.split("\n\n", 1)
+        m = Message(msg.value)  # Gets body of kafka message.
 
-        obj = None
-
-        hdr = parsed_headers()
-        hdr.parse(headers)
+        #print msg.value
 
         if msg.topic == 'openbmp.parsed.collector':
-            processCollectorMsg(hdr.getCollectorHashId(), data, fdir)
+            processCollectorMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.router':
-            processRouterMsg(hdr.getCollectorHashId(), data, fdir)
+            processRouterMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.peer':
-            processPeerMsg(hdr.getCollectorHashId(), data, fdir)
+            processPeerMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.bmp_stat':
-            processBmpStatMsg(hdr.getCollectorHashId(), data, fdir)
+            processBmpStatMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.base_attribute':
-            processBaseAttributeMsg(hdr.getCollectorHashId(), data, fdir)
+            processBaseAttributeMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.unicast_prefix':
-            processUnicastPrefixMsg(hdr.getCollectorHashId(), data, fdir)
+            processUnicastPrefixMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.ls_node':
-            processLsNodeMsg(hdr.getCollectorHashId(), data, fdir)
+            processLsNodeMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.ls_link':
-            processLsLinkMsg(hdr.getCollectorHashId(), data, fdir)
+            processLsLinkMsg(m, fdir)
 
         elif msg.topic == 'openbmp.parsed.ls_prefix':
-            processLsPrefixMsg(hdr.getCollectorHashId(), data, fdir)
+            processLsPrefixMsg(m, fdir)
 
         elif msg.topic == 'openbmp.bmp_raw':
-            processBmpRawMsg(hdr.getCollectorHashId(), hdr.getRouterHashId(), hdr.getRouterIp(), data, fdir)
+            processBmpRawMsg(m, fdir)
 
     except:
         print "ERROR processing message: "
@@ -715,6 +738,7 @@ def init_raw_logger(name, filename):
 
 
 def initLogger(name, filename):
+    # type: (object, object) -> object
     """ Initialize a new logger instance
 
     :param name:        name of logger
@@ -731,18 +755,18 @@ def initLogger(name, filename):
 
     if CONFIG['logging']['rotate'] == "bysize":
         handler = logging.handlers.RotatingFileHandler(
-                            filename=filename,
-                            maxBytes=CONFIG['logging']['bysize']['maxBytes'],
-                            backupCount=CONFIG['logging']['bysize']['backupCount'],
-                            delay=True)
+            filename=filename,
+            maxBytes=CONFIG['logging']['bysize']['maxBytes'],
+            backupCount=CONFIG['logging']['bysize']['backupCount'],
+            delay=True)
 
     elif CONFIG['logging']['rotate'] == "bytime":
         handler = logging.handlers.TimedRotatingFileHandler(
-                            filename=filename,
-                            when=CONFIG['logging']['bytime']['when'],
-                            interval=CONFIG['logging']['bytime']['interval'],
-                            backupCount=CONFIG['logging']['bytime']['backupCount'],
-                            delay=True)
+            filename=filename,
+            when=CONFIG['logging']['bytime']['when'],
+            interval=CONFIG['logging']['bytime']['interval'],
+            backupCount=CONFIG['logging']['bytime']['backupCount'],
+            delay=True)
 
     formatter = logging.Formatter('%(message)s')
     handler.setFormatter(formatter)
@@ -849,11 +873,11 @@ def load_config(cfg_filename):
 
             # Make sure the rotate config is present
             if CONFIG['logging']['rotate'] not in CONFIG['logging']:
-               CONFIG['logging'] = {
-                        'base_path': '/var/openbmp-log',
-                        'bysize': {'maxBytes': 100000000, 'backupCount': 20},
-                        'rotate': 'bysize'
-                    }
+                CONFIG['logging'] = {
+                    'base_path': '/var/openbmp-log',
+                    'bysize': {'maxBytes': 100000000, 'backupCount': 20},
+                    'rotate': 'bysize'
+                }
 
             # based on the rotate method, make sure required vars are defined
             if 'bysize' in CONFIG['logging']['rotate']:
@@ -872,16 +896,16 @@ def load_config(cfg_filename):
 
         else:
             CONFIG['logging'] = {
-                        'base_path': '/tmp/openbmp-log',
-                        'bysize': {'maxBytes': 100000000, 'backupCount': 20},
-                        'rotate': 'bysize'
-                    }
+                'base_path': '/tmp/openbmp-log',
+                'bysize': {'maxBytes': 100000000, 'backupCount': 20},
+                'rotate': 'bysize'
+            }
 
     except (IOError, yaml.YAMLError), e:
         print ("Failed to load mapping config file %s : %r" % (cfg_filename, e))
         if hasattr(e, 'problem_mark'):
             mark = e.problem_mark
-            print ("error on line: %s, column: %s" % (mark.line+1, mark.column+1))
+            print ("error on line: %s, column: %s" % (mark.line + 1, mark.column + 1))
 
         sys.exit(2)
 
@@ -897,7 +921,7 @@ def parseCmdArgs(argv):
 
     try:
         (opts, args) = getopt.getopt(argv[1:], "hc:",
-                                       ["help", "config="])
+                                     ["help", "config="])
 
         for o, a in opts:
             if o in ("-h", "--help"):
@@ -924,8 +948,8 @@ def main():
     parseCmdArgs(sys.argv)
 
     # Enable to topics/feeds
-    topics = [ 'openbmp.parsed.collector', 'openbmp.parsed.router',
-               'openbmp.parsed.peer', 'openbmp.parsed.bmp_stat']
+    topics = ['openbmp.parsed.collector', 'openbmp.parsed.router',
+              'openbmp.parsed.peer', 'openbmp.parsed.bmp_stat']
 
     if CONFIG['topic']['base_attribute']:
         topics.append('openbmp.parsed.base_attribute')
@@ -945,13 +969,13 @@ def main():
         # connect and bind to topics
         print "Connecting to %r ... takes a minute to load offsets and topics, please wait" % CONFIG['kafka']['servers']
         consumer = kafka.KafkaConsumer(
-                            *topics,
-                            bootstrap_servers=CONFIG['kafka']['servers'],
-                            client_id=CONFIG['kafka']['client_id'],
-                            group_id=CONFIG['kafka']['group_id'],
-                            enable_auto_commit=True,
-                            auto_commit_interval_ms=1000,
-                            auto_offset_reset="largest" if CONFIG['kafka']['offset_reset_largest'] else "smallest")
+            *topics,
+            bootstrap_servers=CONFIG['kafka']['servers'],
+            client_id=CONFIG['kafka']['client_id'],
+            group_id=CONFIG['kafka']['group_id'],
+            enable_auto_commit=True,
+            auto_commit_interval_ms=1000,
+            auto_offset_reset="largest" if CONFIG['kafka']['offset_reset_largest'] else "smallest")
 
         print "Connected, now consuming"
         print "Logs are stored under '%s'" % CONFIG['logging']['base_path']
@@ -968,8 +992,9 @@ def main():
 
                 if (cur_ts - ts) >= CONFIG['collector']['heartbeat']['interval']:
                     COLLECTOR_LOGGERS[c].error("%10s | %27s | %32s | " % ("dead",
-                                               datetime.datetime.fromtimestamp(cur_ts).strftime("%Y-%m-%d %H:%M:%S.%f"),
-                                               aid))
+                                                                          datetime.datetime.fromtimestamp(
+                                                                              cur_ts).strftime("%Y-%m-%d %H:%M:%S.%f"),
+                                                                          aid))
 
                     try:
                         del COLLECTOR_LOGGERS[c]
